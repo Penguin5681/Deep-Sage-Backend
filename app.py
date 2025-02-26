@@ -10,7 +10,6 @@ kaggle_api = KaggleApi()
 hf_api = HfApi()
 
 def authenticate_kaggle(username, key):
-    """Authenticate Kaggle API using provided credentials"""
     os.environ['KAGGLE_USERNAME'] = username
     os.environ['KAGGLE_KEY'] = key
     kaggle_api.authenticate()
