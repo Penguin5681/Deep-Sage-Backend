@@ -1,0 +1,174 @@
+from flask import Flask, jsonify, request
+import os
+import requests
+from kaggle.api.kaggle_api_extended import KaggleApi
+from huggingface_hub import HfApi
+
+app = Flask(__name__)
+
+kaggle_api = KaggleApi()
+hf_api = HfApi()
+
+def authenticate_kaggle(username, key):
+    """Authenticate Kaggle API using provided credentials"""
+    os.environ['KAGGLE_USERNAME'] = username
+    os.environ['KAGGLE_KEY'] = key
+    kaggle_api.authenticate()
+
+def get_kaggle_datasets(limit=5, sort_by='hottest'):
+    try:
+        valid_sorts = ['hottest', 'votes', 'updated', 'active', 'published']
+        if sort_by not in valid_sorts:
+            return {'error': f'Invalid sort option. Choose from: {valid_sorts}'}
+            
+        datasets = list(kaggle_api.dataset_list(sort_by=sort_by))[:limit]
+        formatted_datasets = []
+        for dataset in datasets:
+            formatted_datasets.append({
+                'id': dataset.ref,
+                'title': dataset.title,
+                'owner': dataset.ownerName,
+                'url': f'https://www.kaggle.com/datasets/{dataset.ref}',
+                'size': dataset.size,
+                'lastUpdated': dataset.lastUpdated,
+                'downloadCount': dataset.downloadCount,
+                'voteCount': dataset.voteCount,
+                'description': dataset.description
+            })
+
+        return formatted_datasets
+    except Exception as e:
+        return {'error': str(e)}
+
+def get_huggingface_datasets(limit=5, sort_by='downloads'):
+    try:
+        valid_sorts = ['downloads', 'trending', 'modified']
+        if sort_by not in valid_sorts:
+            return {'error': f'Invalid sort option. Choose from: {valid_sorts}'}
+            
+        response = requests.get(
+            'https://huggingface.co/api/datasets',
+            params={'sort': sort_by, 'limit': limit}
+        )
+
+        if response.status_code == 200:
+            datasets = response.json()
+        else:
+            return {'error': f'API returned status code {response.status_code}'}
+
+        formatted_datasets = []
+        for dataset in datasets:
+            formatted_datasets.append({
+                'id': dataset.get('id'),
+                'author': dataset.get('author'),
+                'url': f"https://huggingface.co/datasets/{dataset.get('id')}",
+                'downloads': dataset.get('downloads'),
+                'likes': dataset.get('likes'),
+                'lastModified': dataset.get('lastModified'),
+                'tags': dataset.get('tags', []),
+                'description': dataset.get('description', '')
+            })
+        return formatted_datasets
+    except Exception as e:
+        return {'error': str(e)}
+
+@app.route('/api/datasets/kaggle', methods=['GET'])
+def get_kaggle_datasets_endpoint():
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+    
+    if not username or not key:
+        return jsonify({'error': 'Kaggle username and API key are required in headers'}), 401
+    
+    try:
+        authenticate_kaggle(username, key)
+        limit = int(request.args.get('limit', 5))
+        sort_by = request.args.get('sort_by', 'hottest')
+        result = get_kaggle_datasets(limit, sort_by)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/datasets/huggingface', methods=['GET'])
+def get_huggingface_datasets_endpoint():
+    token = request.headers.get('X-HF-Token')
+    if token:
+        os.environ['HF_TOKEN'] = token
+    
+    limit = int(request.args.get('limit', 5))
+    sort_by = request.args.get('sort_by', 'downloads')
+    result = get_huggingface_datasets(limit, sort_by)
+    return jsonify(result)
+
+@app.route('/api/datasets', methods=['GET'])
+def get_datasets():
+    source = request.args.get('source', 'all')
+    limit = int(request.args.get('limit', 5))
+    
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+    
+    result = {}
+
+    if source.lower() in ['all', 'kaggle']:
+        if username and key:
+            authenticate_kaggle(username, key)
+            sort_by = request.args.get('kaggle_sort', 'hottest')
+            result['kaggle'] = get_kaggle_datasets(limit, sort_by)
+        else:
+            result['kaggle'] = {'error': 'Kaggle credentials required'}
+
+    if source.lower() in ['all', 'huggingface']:
+        token = request.headers.get('X-HF-Token')
+        if token:
+            os.environ['HF_TOKEN'] = token
+        sort_by = request.args.get('hf_sort', 'downloads')
+        result['huggingface'] = get_huggingface_datasets(limit, sort_by)
+
+    return jsonify(result)
+
+@app.route('/api/datasets/download', methods=['POST'])
+def download_dataset():
+    data = request.json
+    source = data.get('source')
+    dataset_id = data.get('dataset_id')
+    path = data.get('path', './datasets')
+    
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+    token = request.headers.get('X-HF-Token')
+
+    if not source or not dataset_id:
+        return jsonify({'error': 'Source and dataset_id are required'}), 400
+    
+    try:
+        if source.lower() == 'kaggle':
+            if not username or not key:
+                return jsonify({'error': 'Kaggle username and API key are required'}), 401
+            
+            authenticate_kaggle(username, key)
+            kaggle_api.dataset_download_files(dataset_id, path, unzip=True)
+            return jsonify({'success': True, 'message': f'Dataset {dataset_id} downloaded successfully to {path}'})
+        
+        elif source.lower() == 'huggingface':
+            if token:
+                os.environ['HF_TOKEN'] = token
+                
+            from datasets import load_dataset
+            dataset = load_dataset(dataset_id, cache_dir=path)
+
+            if isinstance(dataset, dict):
+                for split_name, split_dataset in dataset.items():
+                    split_dataset.to_pandas().to_csv(f"{path}/{dataset_id.replace('/', '_')}_{split_name}.csv", index=False)
+            else:
+                dataset.to_pandas().to_csv(f"{path}/{dataset_id.replace('/', '_')}.csv", index=False)
+            return jsonify({'success': True, 'message': f'Dataset {dataset_id} downloaded successfully to {path}'})
+        
+        else:
+            return jsonify({'error': 'Invalid source. Use "kaggle" or "huggingface"'}), 400
+        
+    except Exception as e:
+        return jsonify({'error': f'Error downloading dataset: {str(e)}'}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
