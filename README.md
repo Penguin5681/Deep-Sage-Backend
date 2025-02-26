@@ -119,7 +119,74 @@ Retrieve datasets from Hugging Face only.
 **Headers:**
 - `X-HF-Token`: Your Hugging Face token (optional)
 
-### 4. Download Dataset
+### 4. Search Datasets
+
+```
+GET /api/search
+```
+
+Search for datasets across Kaggle, Hugging Face, or both.
+
+**Query Parameters:**
+- `query` (required): Search term
+- `source` (optional): Data source to query (`all`, `kaggle`, or `huggingface`). Default: `all`
+- `limit` (optional): Maximum number of datasets to return. Default: `5`
+
+**Headers:**
+- `X-Kaggle-Username`: Your Kaggle username (required for Kaggle searches)
+- `X-Kaggle-Key`: Your Kaggle API key (required for Kaggle searches)
+- `X-HF-Token`: Your Hugging Face token (optional)
+
+### 5. Search Kaggle Datasets
+
+```
+GET /api/search/kaggle
+```
+
+Search for datasets on Kaggle only.
+
+**Query Parameters:**
+- `query` (required): Search term
+- `limit` (optional): Maximum number of results. Default: `5`
+
+**Headers:**
+- `X-Kaggle-Username`: Your Kaggle username (required)
+- `X-Kaggle-Key`: Your Kaggle API key (required)
+
+### 6. Search Hugging Face Datasets
+
+```
+GET /api/search/huggingface
+```
+
+Search for datasets on Hugging Face only.
+
+**Query Parameters:**
+- `query` (required): Search term
+- `limit` (optional): Maximum number of results. Default: `5`
+
+**Headers:**
+- `X-HF-Token`: Your Hugging Face token (optional)
+
+### 7. Get Dataset Suggestions
+
+```
+GET /api/suggestions
+```
+
+Get dataset name suggestions based on a query string.
+
+**Query Parameters:**
+- `query` (required): Partial search term (minimum 2 characters)
+- `source` (optional): Data source to query (`all`, `kaggle`, or `huggingface`). Default: `all`
+- `limit` (optional): Maximum number of suggestions. Default: `5`
+
+**Headers:**
+- `X-Kaggle-Username`: Your Kaggle username (required for Kaggle suggestions)
+- `X-Kaggle-Key`: Your Kaggle API key (required for Kaggle suggestions)
+- `X-HF-Token`: Your Hugging Face token (optional)
+
+### 8. Download Dataset
 
 ```
 POST /api/datasets/download
@@ -164,7 +231,3 @@ python app.py
 ```
 
 The server will start on `http://localhost:5000`.
-
-## License
-
-[Your License Here]

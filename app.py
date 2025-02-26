@@ -168,6 +168,168 @@ def download_dataset():
         
     except Exception as e:
         return jsonify({'error': f'Error downloading dataset: {str(e)}'}), 500
+    
+def search_kaggle_datasets(query, limit=5):
+    try:
+        datasets = list(kaggle_api.dataset_list(search=query))[:limit]
+        formatted_datasets = []
+        for dataset in datasets:
+            formatted_datasets.append({
+                'id': dataset.ref,
+                'title': dataset.title,
+                'owner': dataset.ownerName,
+                'url': f'https://www.kaggle.com/datasets/{dataset.ref}',
+                'size': dataset.size,
+                'lastUpdated': dataset.lastUpdated,
+                'downloadCount': dataset.downloadCount,
+                'voteCount': dataset.voteCount,
+                'description': dataset.description
+            })
+        return formatted_datasets
+    except Exception as e:
+        return {'error': str(e)}
+
+def search_huggingface_datasets(query, limit=5):
+    try:
+        response = requests.get(
+            'https://huggingface.co/api/datasets',
+            params={'search': query, 'limit': limit}
+        )
+
+        if response.status_code == 200:
+            datasets = response.json()
+        else:
+            return {'error': f'API returned status code {response.status_code}'}
+
+        formatted_datasets = []
+        for dataset in datasets:
+            formatted_datasets.append({
+                'id': dataset.get('id'),
+                'author': dataset.get('author'),
+                'url': f"https://huggingface.co/datasets/{dataset.get('id')}",
+                'downloads': dataset.get('downloads'),
+                'likes': dataset.get('likes'),
+                'lastModified': dataset.get('lastModified'),
+                'tags': dataset.get('tags', []),
+                'description': dataset.get('description', '')
+            })
+        return formatted_datasets
+    except Exception as e:
+        return {'error': str(e)}
+
+@app.route('/api/search/kaggle', methods=['GET'])
+def search_kaggle_endpoint():
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+    query = request.args.get('query')
+    
+    if not username or not key:
+        return jsonify({'error': 'Kaggle username and API key are required in headers'}), 401
+    
+    if not query:
+        return jsonify({'error': 'Query parameter is required'}), 400
+    
+    try:
+        authenticate_kaggle(username, key)
+        limit = int(request.args.get('limit', 5))
+        result = search_kaggle_datasets(query, limit)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/search/huggingface', methods=['GET'])
+def search_huggingface_endpoint():
+    token = request.headers.get('X-HF-Token')
+    query = request.args.get('query')
+    
+    if not query:
+        return jsonify({'error': 'Query parameter is required'}), 400
+    
+    if token:
+        os.environ['HF_TOKEN'] = token
+    
+    limit = int(request.args.get('limit', 5))
+    result = search_huggingface_datasets(query, limit)
+    return jsonify(result)
+
+@app.route('/api/search', methods=['GET'])
+def search_all_datasets():
+    query = request.args.get('query')
+    if not query:
+        return jsonify({'error': 'Query parameter is required'}), 400
+    
+    source = request.args.get('source', 'all')
+    limit = int(request.args.get('limit', 5))
+    
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+    token = request.headers.get('X-HF-Token')
+    
+    result = {}
+
+    if source.lower() in ['all', 'kaggle']:
+        if username and key:
+            authenticate_kaggle(username, key)
+            result['kaggle'] = search_kaggle_datasets(query, limit)
+        else:
+            result['kaggle'] = {'error': 'Kaggle credentials required'}
+
+    if source.lower() in ['all', 'huggingface']:
+        if token:
+            os.environ['HF_TOKEN'] = token
+        result['huggingface'] = search_huggingface_datasets(query, limit)
+
+    return jsonify(result)
+
+def get_dataset_suggestions(query, source, limit=5):
+    suggestions = []
+    
+    try:
+        if source.lower() == 'kaggle':
+            datasets = list(kaggle_api.dataset_list(search=query))[:limit]
+            suggestions = [dataset.title for dataset in datasets]
+            
+        elif source.lower() == 'huggingface':
+            response = requests.get(
+                'https://huggingface.co/api/datasets',
+                params={'search': query, 'limit': limit}
+            )
+            if response.status_code == 200:
+                datasets = response.json()
+                suggestions = [dataset.get('id') for dataset in datasets]
+                
+    except Exception as e:
+        return {'error': str(e)}
+        
+    return suggestions
+
+@app.route('/api/suggestions', methods=['GET'])
+def get_suggestions():
+    query = request.args.get('query', '')
+    source = request.args.get('source', 'all')
+    limit = int(request.args.get('limit', 5))
+    
+    if len(query) < 2: 
+        return jsonify([])
+    
+    result = {}
+    
+    if source.lower() in ['all', 'kaggle']:
+        username = request.headers.get('X-Kaggle-Username')
+        key = request.headers.get('X-Kaggle-Key')
+        if username and key:
+            authenticate_kaggle(username, key)
+            result['kaggle'] = get_dataset_suggestions(query, 'kaggle', limit)
+        else:
+            result['kaggle'] = {'error': 'Kaggle credentials required'}
+            
+    if source.lower() in ['all', 'huggingface']:
+        token = request.headers.get('X-HF-Token')
+        if token:
+            os.environ['HF_TOKEN'] = token
+        result['huggingface'] = get_dataset_suggestions(query, 'huggingface', limit)
+    
+    return jsonify(result)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
