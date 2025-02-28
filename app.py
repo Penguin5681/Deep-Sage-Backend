@@ -3,8 +3,16 @@ import os
 import requests
 from kaggle.api.kaggle_api_extended import KaggleApi
 from huggingface_hub import HfApi
+from flask_caching import Cache
+
+cache_config = {
+    "CACHE_TYPE": "SimpleCache",
+    "CACHE_DEFAULT_TIMEOUT": 300 # The cached results will be valid for 5 mins
+}
 
 app = Flask(__name__)
+
+cache = Cache(app, config=cache_config)
 
 kaggle_api = KaggleApi()
 hf_api = HfApi()
@@ -169,6 +177,7 @@ def download_dataset():
     except Exception as e:
         return jsonify({'error': f'Error downloading dataset: {str(e)}'}), 500
     
+@cache.memoize(timeout=300)
 def search_kaggle_datasets(query, limit=5):
     try:
         datasets = list(kaggle_api.dataset_list(search=query))[:limit]
@@ -189,6 +198,7 @@ def search_kaggle_datasets(query, limit=5):
     except Exception as e:
         return {'error': str(e)}
 
+@cache.memoize(timeout=300)
 def search_huggingface_datasets(query, limit=5):
     try:
         response = requests.get(
@@ -281,6 +291,7 @@ def search_all_datasets():
 
     return jsonify(result)
 
+@cache.memoize(timeout=300)
 def get_dataset_suggestions(query, source, limit=5):
     suggestions = []
     
