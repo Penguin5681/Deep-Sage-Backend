@@ -5,6 +5,7 @@ from kaggle.api.kaggle_api_extended import KaggleApi
 from huggingface_hub import HfApi
 from flask_caching import Cache
 from datasets import get_dataset_config_names
+import concurrent.futures
 
 cache_config = {
     "CACHE_TYPE": "SimpleCache",
@@ -152,9 +153,51 @@ def get_dataset_configs():
         
     try:
         configs = get_dataset_config_names(dataset_id)
+        
+        configs_with_size = []
+        from datasets import load_dataset_builder
+        
+        for config in configs:
+            try:
+                builder = load_dataset_builder(dataset_id, config)
+                
+                info = builder.info
+                
+                total_size = 0
+                num_examples = 0
+                splits = {}
+                
+                if hasattr(info, 'splits') and info.splits:
+                    for split_name, split_info in info.splits.items():
+                        split_size = getattr(split_info, 'num_bytes', 0)
+                        split_examples = getattr(split_info, 'num_examples', 0)
+                        total_size += split_size
+                        num_examples += split_examples
+                        splits[split_name] = {
+                            'size_bytes': split_size,
+                            'num_examples': split_examples
+                        }
+                
+                config_info = {
+                    'name': config,
+                    'total_size_bytes': total_size,
+                    'total_examples': num_examples,
+                    'splits': splits,
+                    'description': getattr(info, 'description', ''),
+                    'features': str(getattr(info, 'features', {}))
+                }
+                
+                configs_with_size.append(config_info)
+                
+            except Exception as e:
+                configs_with_size.append({
+                    'name': config,
+                    'error': f"Couldn't fetch size: {str(e)}"
+                })
+        
         return jsonify({
             'dataset_id': dataset_id,
-            'configs': configs
+            'configs': configs_with_size
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -181,7 +224,7 @@ def download_dataset():
                 return jsonify({'error': 'Kaggle username and API key are required'}), 401
 
             authenticate_kaggle(username, key)
-            kaggle_api.dataset_download_files(dataset_id, path, unzip=True)
+            kaggle_api.dataset_download_files(dataset_id, path, unzip=False)
             return jsonify({'success': True, 'message': f'Dataset {dataset_id} downloaded successfully to {path}'})
 
         elif source.lower() == 'huggingface':
@@ -300,10 +343,38 @@ def search_kaggle_endpoint():
         return jsonify({'error': str(e)}), 500
 
 
+@cache.memoize(timeout=1800)  
+def fetch_config_info(dataset_id, config):
+    try:
+        from datasets import load_dataset_builder
+        builder = load_dataset_builder(dataset_id, config)
+        info = builder.info
+        
+        total_size = 0
+        num_examples = 0
+        
+        if hasattr(info, 'splits') and info.splits:
+            for split_name, split_info in info.splits.items():
+                total_size += getattr(split_info, 'num_bytes', 0)
+                num_examples += getattr(split_info, 'num_examples', 0)
+        
+        return {
+            'name': config,
+            'total_size_bytes': total_size,
+            'total_examples': num_examples
+        }
+    except Exception as e:
+        return {
+            'name': config,
+            'error': f"Couldn't fetch info: {str(e)}"
+        }
+
 @app.route('/api/search/huggingface', methods=['GET'])
 def search_huggingface_endpoint():
     token = request.headers.get('X-HF-Token')
     query = request.args.get('query')
+    include_configs = request.args.get('include_configs', 'false').lower() == 'true'
+    config_detail_level = request.args.get('config_detail', 'basic')  # Options: none, basic, full
 
     if not query:
         return jsonify({'error': 'Query parameter is required'}), 400
@@ -313,8 +384,57 @@ def search_huggingface_endpoint():
 
     limit = int(request.args.get('limit', 5))
     result = search_huggingface_datasets(query, limit)
-    return jsonify(result)
-
+    
+    if isinstance(result, dict) and 'error' in result:
+        return jsonify(result), 500
+    
+    if not include_configs or config_detail_level == 'none':
+        return jsonify(result)
+    
+    def process_dataset_configs(dataset):
+        try:
+            dataset_id = dataset.get('id')
+            if not dataset_id:
+                return dataset
+                
+            configs = get_dataset_config_names(dataset_id)
+            if not configs:
+                dataset['configs'] = []
+                return dataset
+                
+            if config_detail_level == 'basic':
+                dataset['configs'] = [{'name': config} for config in configs]
+                if len(configs) > 5:
+                    dataset['total_configs'] = len(configs)
+                return dataset
+            
+            max_configs_to_process = 5
+            configs_to_process = configs[:max_configs_to_process]
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                future_to_config = {
+                    executor.submit(fetch_config_info, dataset_id, config): config 
+                    for config in configs_to_process
+                }
+                
+                configs_info = []
+                for future in concurrent.futures.as_completed(future_to_config):
+                    configs_info.append(future.result())
+            
+            if len(configs) > max_configs_to_process:
+                dataset['additional_configs'] = len(configs) - max_configs_to_process
+            
+            dataset['configs'] = configs_info
+            return dataset
+            
+        except Exception as e:
+            dataset['configs_error'] = str(e)
+            return dataset
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(result), 3)) as executor:
+        processed_datasets = list(executor.map(process_dataset_configs, result))
+    
+    return jsonify(processed_datasets)
 
 @app.route('/api/search', methods=['GET'])
 def search_all_datasets():
