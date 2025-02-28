@@ -309,7 +309,7 @@ def get_suggestions():
     source = request.args.get('source', 'all')
     limit = int(request.args.get('limit', 5))
     
-    if len(query) < 2: 
+    if len(query) < 1: 
         return jsonify([])
     
     result = {}
