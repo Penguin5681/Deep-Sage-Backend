@@ -4,7 +4,7 @@ import requests
 from kaggle.api.kaggle_api_extended import KaggleApi
 from huggingface_hub import HfApi
 from flask_caching import Cache
-from datasets import get_dataset_config_names
+from datasets import get_dataset_config_names, load_dataset
 import concurrent.futures
 
 cache_config = {
@@ -159,6 +159,7 @@ def get_huggingface_datasets(limit=5, sort_by='downloads'):
 
 
 @app.route('/api/datasets/kaggle', methods=['GET'])
+@cache.memoize(300)
 def get_kaggle_datasets_endpoint():
     """
     Flask endpoint that retrieves Kaggle datasets based on specified criteria.
@@ -205,6 +206,7 @@ def get_kaggle_datasets_endpoint():
 
 
 @app.route('/api/datasets/huggingface', methods=['GET'])
+@cache.memoize(300)
 def get_huggingface_datasets_endpoint():
     """
     Flask endpoint that retrieves Hugging Face datasets based on specified criteria.
@@ -302,197 +304,152 @@ def get_datasets():
 
 
 @app.route('/api/datasets/configs', methods=['GET'])
+@cache.memoize(300)
 def get_dataset_configs():
-    """
-    Flask endpoint that retrieves configuration information for a specified Hugging Face dataset.
-    
-    This endpoint fetches all available configurations for a dataset and provides detailed 
-    information about each configuration including size, number of examples, splits, and features.
-    For each configuration, it attempts to load the dataset builder to extract metadata.
-    
-    HTTP Method: GET
-    Route: /api/datasets/configs
-    
-    Query Parameters:
-        dataset_id (str, required): The Hugging Face dataset identifier (e.g., 'squad', 'glue')
-            
-    Returns:
-        JSON response containing:
-        - dataset_id: The requested dataset identifier
-        - configs: List of configuration objects, each containing:
-          - name: Configuration name
-          - total_size_bytes: Total size of the dataset in bytes
-          - total_examples: Total number of examples across all splits
-          - splits: Dictionary of splits with size and example count information
-          - description: Dataset description
-          - features: String representation of dataset features
-          
-        If a configuration cannot be loaded, its entry will include an error message.
-        If the dataset_id parameter is missing or an error occurs, returns an appropriate error response.
-        
-    Status Codes:
-        200: Success
-        400: Missing dataset_id parameter
-        500: Server error when retrieving configurations
-    """
     dataset_id = request.args.get('dataset_id')
     if not dataset_id:
         return jsonify({'error': 'dataset_id parameter is required'}), 400
 
     try:
         configs = get_dataset_config_names(dataset_id)
-
-        configs_with_size = []
-        from datasets import load_dataset_builder
-
-        for config in configs:
-            try:
-                builder = load_dataset_builder(dataset_id, config)
-
-                info = builder.info
-
-                total_size = 0
-                num_examples = 0
-                splits = {}
-
-                if hasattr(info, 'splits') and info.splits:
-                    for split_name, split_info in info.splits.items():
-                        split_size = getattr(split_info, 'num_bytes', 0)
-                        split_examples = getattr(split_info, 'num_examples', 0)
-                        total_size += split_size
-                        num_examples += split_examples
-                        splits[split_name] = {
-                            'size_bytes': split_size,
-                            'num_examples': split_examples
-                        }
-
-                config_info = {
-                    'name': config,
-                    'total_size_bytes': total_size,
-                    'total_examples': num_examples,
-                    'splits': splits,
-                    'description': getattr(info, 'description', ''),
-                    'features': str(getattr(info, 'features', {}))
-                }
-
-                configs_with_size.append(config_info)
-
-            except Exception as e:
-                configs_with_size.append({
-                    'name': config,
-                    'error': f"Couldn't fetch size: {str(e)}"
-                })
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_config = {
+                executor.submit(get_config_info, dataset_id, config): config 
+                for config in configs
+            }
+            
+            configs_with_size = []
+            for future in concurrent.futures.as_completed(future_to_config, timeout=30):
+                config = future_to_config[future]
+                try:
+                    result = future.result()
+                    configs_with_size.append(result)
+                except Exception as e:
+                    configs_with_size.append({
+                        'name': config,
+                        'error': f"Couldn't fetch size: {str(e)}"
+                    })
 
         return jsonify({
             'dataset_id': dataset_id,
             'configs': configs_with_size
         })
+    except concurrent.futures.TimeoutError:
+        return jsonify({
+            'error': 'Request timed out while fetching configurations',
+            'partial_results': configs_with_size
+        }), 408
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+def get_config_info(dataset_id, config):
+    """Helper function to get info for a single config"""
+    try:
+        from datasets import load_dataset_builder
+        builder = load_dataset_builder(dataset_id, config)
+        info = builder.info
+
+        total_size = 0
+        num_examples = 0
+        splits = {}
+
+        if hasattr(info, 'splits') and info.splits:
+            for split_name, split_info in info.splits.items():
+                split_size = getattr(split_info, 'num_bytes', 0)
+                split_examples = getattr(split_info, 'num_examples', 0)
+                total_size += split_size
+                num_examples += split_examples
+                splits[split_name] = {
+                    'size_bytes': split_size,
+                    'num_examples': split_examples
+                }
+
+        return {
+            'name': config,
+            'total_size_bytes': total_size,
+            'total_examples': num_examples,
+            'splits': splits,
+            'description': getattr(info, 'description', ''),
+            'features': str(getattr(info, 'features', {}))
+        }
+    except Exception as e:
+        return {
+            'name': config,
+            'error': f"Couldn't fetch size: {str(e)}"
+        }
 
 
 @app.route('/api/datasets/download', methods=['POST'])
 def download_dataset():
-    """
-    Flask endpoint that downloads a dataset from either Kaggle or Hugging Face based on the specified parameters.
-    
-    This endpoint handles downloading datasets from multiple sources, each with their own authentication
-    requirements and download mechanisms. It supports specifying a download location and, for Hugging Face
-    datasets, configuration options.
-    
-    HTTP Method: POST
-    Route: /api/datasets/download
-    
-    Request Headers:
-        X-Kaggle-Username (required for Kaggle): Kaggle username for authentication
-        X-Kaggle-Key (required for Kaggle): Kaggle API key for authentication
-        X-HF-Token (optional for Hugging Face): Hugging Face API token for accessing private datasets
-        
-    Request Body (JSON):
-        source (str, required): Source to download from, either 'kaggle' or 'huggingface'
-        dataset_id (str, required): Dataset identifier to download
-        path (str, optional): Local path to save the dataset to. Defaults to './datasets'
-        config (str, optional): Configuration name for Hugging Face datasets
-            
-    Returns:
-        JSON response containing:
-        - For successful downloads: success status and message with download details
-        - For missing configs: error with available configurations for the dataset
-        - For errors: appropriate error message
-        
-    Status Codes:
-        200: Success
-        400: Missing required parameters or invalid source
-        401: Missing authentication credentials
-        500: Error during download process
-        
-    Note:
-        - Kaggle datasets are downloaded as zip files and not automatically extracted
-        - Hugging Face datasets are converted to CSV format and saved to the specified path
-    """
+    """Download dataset to specified path or default folder."""
     data = request.json
     source = data.get('source')
     dataset_id = data.get('dataset_id')
-    path = data.get('path', './datasets')
+    # Default to './downloads' if no path specified
+    download_path = data.get('path', './downloads')
     config = data.get('config')
-
-    username = request.headers.get('X-Kaggle-Username')
-    key = request.headers.get('X-Kaggle-Key')
-    token = request.headers.get('X-HF-Token')
 
     if not source or not dataset_id:
         return jsonify({'error': 'Source and dataset_id are required'}), 400
 
+    # Create download directory if it doesn't exist
+    os.makedirs(download_path, exist_ok=True)
+
     try:
         if source.lower() == 'kaggle':
+            username = request.headers.get('X-Kaggle-Username')
+            key = request.headers.get('X-Kaggle-Key')
+            
             if not username or not key:
-                return jsonify({'error': 'Kaggle username and API key are required'}), 401
+                return jsonify({'error': 'Kaggle credentials required'}), 401
 
             authenticate_kaggle(username, key)
-            kaggle_api.dataset_download_files(dataset_id, path, unzip=False)
-            return jsonify({'success': True, 'message': f'Dataset {dataset_id} downloaded successfully to {path}'})
+            # Download directly to specified path
+            kaggle_api.dataset_download_files(
+                dataset_id, 
+                path=download_path, 
+                unzip=True  # Unzip for easier access
+            )
+            return jsonify({
+                'success': True,
+                'message': f'Dataset downloaded to {download_path}',
+                'path': download_path
+            })
 
         elif source.lower() == 'huggingface':
-            if token:
-                os.environ['HF_TOKEN'] = token
-
-            from datasets import load_dataset
-            try:
-                if config:
-                    dataset = load_dataset(dataset_id, config, cache_dir=path)
-                else:
-                    dataset = load_dataset(dataset_id, cache_dir=path)
-            except ValueError as e:
-                if "Config name is missing" in str(e):
-                    import re
-                    configs = re.search(
-                        r"pick one among the available configs: \[(.*?)\]", str(e))
-                    if configs:
-                        available_configs = configs.group(
-                            1).replace("'", "").split(', ')
-                        return jsonify({
-                            'error': 'Config name is missing',
-                            'available_configs': available_configs,
-                            'message': f"Please specify a config from: {', '.join(available_configs)}."
-                        }), 400
-                raise e
-
-            if isinstance(dataset, dict):
-                for split_name, split_dataset in dataset.items():
-                    split_dataset.to_pandas().to_csv(
-                        f"{path}/{dataset_id.replace('/', '_')}_{split_name}.csv", index=False)
+            if config:
+                dataset = load_dataset(dataset_id, config)
             else:
-                dataset.to_pandas().to_csv(
-                    f"{path}/{dataset_id.replace('/', '_')}.csv", index=False)
+                dataset = load_dataset(dataset_id)
+            
+            # Generate filename
+            base_filename = f"{dataset_id.replace('/', '_')}"
+            
+            # Save each split as CSV
+            if isinstance(dataset, dict):
+                files = []
+                for split_name, split_dataset in dataset.items():
+                    file_path = os.path.join(download_path, f"{base_filename}_{split_name}.csv")
+                    split_dataset.to_pandas().to_csv(file_path, index=False)
+                    files.append(file_path)
+            else:
+                file_path = os.path.join(download_path, f"{base_filename}.csv")
+                dataset.to_pandas().to_csv(file_path, index=False)
+                files = [file_path]
 
-            config_info = f" with config '{config}'" if config else ""
-            return jsonify({'success': True, 'message': f'Dataset {dataset_id}{config_info} downloaded successfully to {path}'})
+            return jsonify({
+                'success': True,
+                'message': f'Dataset downloaded to {download_path}',
+                'path': download_path,
+                'files': files
+            })
 
         else:
             return jsonify({'error': 'Invalid source. Use "kaggle" or "huggingface"'}), 400
 
     except Exception as e:
-        return jsonify({'error': f'Error downloading dataset: {str(e)}'}), 500
+        return jsonify({'error': str(e)}), 500
 
 
 @cache.memoize(timeout=300)
@@ -654,6 +611,65 @@ def search_kaggle_endpoint():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/retrieve-dataset', methods=["GET"])
+def retrieve_hf_dataset():
+    """
+    Flask endpoint that retrieves metadata for a specific Hugging Face dataset.
+    
+    This endpoint retrieves basic metadata about a Hugging Face dataset including its
+    description, author, download count, likes, and available configurations.
+    
+    HTTP Method: GET
+    Route: /api/retrieve-dataset
+    
+    Query Parameters:
+        dataset_id (str, required): The Hugging Face dataset identifier
+            
+    Returns:
+        JSON response containing:
+        - id: The dataset identifier
+        - author: Username of dataset author
+        - description: Dataset description
+        - lastModified: When the dataset was last modified
+        - downloads: Number of downloads
+        - likes: Number of likes/upvotes
+        - configs: List of available configuration names
+        
+    Status Codes:
+        200: Success
+        400: Missing dataset_id parameter
+        500: Error retrieving dataset metadata
+    """
+    dataset_id = request.args.get('dataset_id')
+    
+    if not dataset_id:
+        return jsonify({'error': 'dataset_id parameter is required'}), 400
+    
+    try:
+        response = requests.get(f'https://huggingface.co/api/datasets/{dataset_id}')
+        
+        if response.status_code != 200:
+            return jsonify({'error': f'Dataset not found or API returned status code {response.status_code}'}), 404
+            
+        dataset_info = response.json()
+        
+        configs = get_dataset_config_names(dataset_id)
+        
+        result = {
+            'id': dataset_info.get('id'),
+            'author': dataset_info.get('author'),
+            'description': dataset_info.get('description', ''),
+            'lastModified': dataset_info.get('lastModified'),
+            'downloads': dataset_info.get('downloads'),
+            'likes': dataset_info.get('likes'),
+            'configs': configs
+        }
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @cache.memoize(timeout=1800)
 def fetch_config_info(dataset_id, config):
