@@ -102,16 +102,16 @@ def get_kaggle_datasets(limit=5, sort_by='hottest'):
 def get_huggingface_datasets(limit=5, sort_by='downloads'):
     """
     Retrieves a list of datasets from Hugging Face and formats them into a standardized structure.
-    
+
     This function fetches datasets from the Hugging Face API based on the specified sorting criteria
     and limits the number of results. It validates the sorting option against allowed values
     and handles any exceptions that may occur during the API call.
-    
+
     Args:
         limit (int, optional): Maximum number of datasets to return. Defaults to 5.
         sort_by (str, optional): Criteria to sort datasets by. Defaults to 'downloads'.
             Valid options are: 'downloads', 'trending', 'modified'.
-            
+
     Returns:
         list or dict: If successful, returns a list of dictionaries containing formatted dataset
             information with the following keys:
@@ -123,7 +123,7 @@ def get_huggingface_datasets(limit=5, sort_by='downloads'):
             - lastModified: When the dataset was last modified
             - tags: List of dataset tags
             - description: Dataset description
-            
+
             If an error occurs or sort_by is invalid, returns a dictionary with an 'error' key.
     """
     try:
@@ -163,29 +163,29 @@ def get_huggingface_datasets(limit=5, sort_by='downloads'):
 def get_kaggle_datasets_endpoint():
     """
     Flask endpoint that retrieves Kaggle datasets based on specified criteria.
-    
+
     This endpoint requires Kaggle authentication credentials in the request headers.
     It extracts username and API key from headers, authenticates with the Kaggle API,
     and then calls the get_kaggle_datasets function with parameters from the request.
-    
+
     HTTP Method: GET
     Route: /api/datasets/kaggle
-    
+
     Request Headers:
         X-Kaggle-Username: Kaggle username for authentication
         X-Kaggle-Key: Kaggle API key for authentication
-        
+
     Query Parameters:
         limit (int, optional): Maximum number of datasets to return. Defaults to 5.
         sort_by (str, optional): Criteria to sort datasets by. Defaults to 'hottest'.
             Valid options are: 'hottest', 'votes', 'updated', 'active', 'published'.
-            
+
     Returns:
         JSON response containing either:
         - A list of formatted Kaggle datasets
-        - An error message with appropriate HTTP status code (401 for authentication errors, 
+        - An error message with appropriate HTTP status code (401 for authentication errors,
           500 for other errors)
-        
+
     Note:
         Authentication is mandatory for this endpoint.
     """
@@ -210,27 +210,27 @@ def get_kaggle_datasets_endpoint():
 def get_huggingface_datasets_endpoint():
     """
     Flask endpoint that retrieves Hugging Face datasets based on specified criteria.
-    
+
     This endpoint allows optional authentication with a Hugging Face token provided in the
     request headers. It extracts query parameters for limit and sorting criteria, then
     calls the get_huggingface_datasets function to fetch and format dataset information.
-    
+
     HTTP Method: GET
     Route: /api/datasets/huggingface
-    
+
     Request Headers:
         X-HF-Token (optional): Hugging Face API token for accessing private or gated datasets
-        
+
     Query Parameters:
         limit (int, optional): Maximum number of datasets to return. Defaults to 5.
         sort_by (str, optional): Criteria to sort datasets by. Defaults to 'downloads'.
             Valid options are: 'downloads', 'trending', 'modified'.
-            
+
     Returns:
         JSON response containing either:
         - A list of formatted Hugging Face datasets
         - An error message with appropriate HTTP status code
-        
+
     Note:
         Unlike the Kaggle endpoint, authentication is optional for this endpoint.
     """
@@ -248,32 +248,32 @@ def get_huggingface_datasets_endpoint():
 def get_datasets():
     """
     Flask endpoint that retrieves datasets from multiple sources based on specified parameters.
-    
+
     This unified endpoint allows fetching datasets from both Kaggle and Hugging Face simultaneously
     or selectively, based on the 'source' parameter. It handles authentication for both platforms
     and applies source-specific sorting criteria.
-    
+
     HTTP Method: GET
     Route: /api/datasets
-    
+
     Request Headers:
         X-Kaggle-Username (optional): Kaggle username for authentication
         X-Kaggle-Key (optional): Kaggle API key for authentication
         X-HF-Token (optional): Hugging Face API token for authentication
-        
+
     Query Parameters:
         source (str, optional): Source to fetch datasets from. Defaults to 'all'.
             Valid options are: 'all', 'kaggle', 'huggingface'
         limit (int, optional): Maximum number of datasets to return per source. Defaults to 5.
         kaggle_sort (str, optional): Criteria to sort Kaggle datasets by. Defaults to 'hottest'.
         hf_sort (str, optional): Criteria to sort Hugging Face datasets by. Defaults to 'downloads'.
-            
+
     Returns:
         JSON response containing:
         - A dictionary with keys for each requested source ('kaggle', 'huggingface')
         - Each source key contains either a list of datasets or an error message
         - For Kaggle, returns an error if credentials are not provided
-        
+
     Note:
         Authentication is required for Kaggle datasets, optional for Hugging Face.
     """
@@ -312,13 +312,13 @@ def get_dataset_configs():
 
     try:
         configs = get_dataset_config_names(dataset_id)
-        
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_config = {
-                executor.submit(get_config_info, dataset_id, config): config 
+                executor.submit(get_config_info, dataset_id, config): config
                 for config in configs
             }
-            
+
             configs_with_size = []
             for future in concurrent.futures.as_completed(future_to_config, timeout=30):
                 config = future_to_config[future]
@@ -342,6 +342,7 @@ def get_dataset_configs():
         }), 408
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 def get_config_info(dataset_id, config):
     """Helper function to get info for a single config"""
@@ -386,30 +387,27 @@ def download_dataset():
     data = request.json
     source = data.get('source')
     dataset_id = data.get('dataset_id')
-    # Default to './downloads' if no path specified
     download_path = data.get('path', './downloads')
     config = data.get('config')
 
     if not source or not dataset_id:
         return jsonify({'error': 'Source and dataset_id are required'}), 400
 
-    # Create download directory if it doesn't exist
     os.makedirs(download_path, exist_ok=True)
 
     try:
         if source.lower() == 'kaggle':
             username = request.headers.get('X-Kaggle-Username')
             key = request.headers.get('X-Kaggle-Key')
-            
+
             if not username or not key:
                 return jsonify({'error': 'Kaggle credentials required'}), 401
 
             authenticate_kaggle(username, key)
-            # Download directly to specified path
             kaggle_api.dataset_download_files(
-                dataset_id, 
-                path=download_path, 
-                unzip=True  # Unzip for easier access
+                dataset_id,
+                path=download_path,
+                unzip=True
             )
             return jsonify({
                 'success': True,
@@ -422,15 +420,14 @@ def download_dataset():
                 dataset = load_dataset(dataset_id, config)
             else:
                 dataset = load_dataset(dataset_id)
-            
-            # Generate filename
+
             base_filename = f"{dataset_id.replace('/', '_')}"
-            
-            # Save each split as CSV
+
             if isinstance(dataset, dict):
                 files = []
                 for split_name, split_dataset in dataset.items():
-                    file_path = os.path.join(download_path, f"{base_filename}_{split_name}.csv")
+                    file_path = os.path.join(
+                        download_path, f"{base_filename}_{split_name}.csv")
                     split_dataset.to_pandas().to_csv(file_path, index=False)
                     files.append(file_path)
             else:
@@ -456,15 +453,15 @@ def download_dataset():
 def search_kaggle_datasets(query, limit=5):
     """
     Searches Kaggle datasets that match a query string and formats results.
-    
+
     This function searches the Kaggle API for datasets matching the provided query
     and formats them into a standardized structure. Results are cached for 5 minutes
     to improve performance and reduce API calls.
-    
+
     Args:
         query (str): Search query to find datasets
         limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-            
+
     Returns:
         list or dict: If successful, returns a list of dictionaries containing formatted dataset
             information with the following keys:
@@ -477,9 +474,9 @@ def search_kaggle_datasets(query, limit=5):
             - downloadCount: Number of downloads
             - voteCount: Number of votes/upvotes
             - description: Dataset description
-            
+
             If an error occurs, returns a dictionary with an 'error' key.
-            
+
     Note:
         - Requires prior authentication with the Kaggle API using authenticate_kaggle().
         - Results are cached for 300 seconds (5 minutes) to improve performance.
@@ -508,15 +505,15 @@ def search_kaggle_datasets(query, limit=5):
 def search_huggingface_datasets(query, limit=5):
     """
     Searches Hugging Face datasets that match a query string and formats results.
-    
+
     This function searches the Hugging Face API for datasets matching the provided query
     and formats them into a standardized structure. Results are cached for 5 minutes
     to improve performance and reduce API calls.
-    
+
     Args:
         query (str): Search query to find datasets
         limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-            
+
     Returns:
         list or dict: If successful, returns a list of dictionaries containing formatted dataset
             information with the following keys:
@@ -528,9 +525,9 @@ def search_huggingface_datasets(query, limit=5):
             - lastModified: When the dataset was last modified
             - tags: List of dataset tags
             - description: Dataset description
-            
+
             If an error occurs, returns a dictionary with an 'error' key.
-            
+
     Note:
         - Results are cached for 300 seconds (5 minutes) to improve performance.
         - Authentication is optional but may be necessary for accessing private datasets.
@@ -567,28 +564,28 @@ def search_huggingface_datasets(query, limit=5):
 def search_kaggle_endpoint():
     """
     Flask endpoint that searches for Kaggle datasets matching a query string.
-    
+
     This endpoint requires Kaggle authentication credentials in the request headers.
     It extracts the search query from request parameters, authenticates with the Kaggle API,
     and then calls the search_kaggle_datasets function to perform the search.
-    
+
     HTTP Method: GET
     Route: /api/search/kaggle
-    
+
     Request Headers:
         X-Kaggle-Username: Kaggle username for authentication
         X-Kaggle-Key: Kaggle API key for authentication
-        
+
     Query Parameters:
         query (str, required): Search term to find matching datasets
         limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-            
+
     Returns:
         JSON response containing either:
         - A list of formatted Kaggle datasets matching the search query
         - An error message with appropriate HTTP status code (401 for authentication errors,
           400 for missing query, 500 for other errors)
-        
+
     Note:
         - Authentication is mandatory for this endpoint
         - Results are cached for 5 minutes to improve performance
@@ -616,16 +613,16 @@ def search_kaggle_endpoint():
 def retrieve_hf_dataset():
     """
     Flask endpoint that retrieves metadata for a specific Hugging Face dataset.
-    
+
     This endpoint retrieves basic metadata about a Hugging Face dataset including its
     description, author, download count, likes, and available configurations.
-    
+
     HTTP Method: GET
     Route: /api/retrieve-dataset
-    
+
     Query Parameters:
         dataset_id (str, required): The Hugging Face dataset identifier
-            
+
     Returns:
         JSON response containing:
         - id: The dataset identifier
@@ -635,27 +632,28 @@ def retrieve_hf_dataset():
         - downloads: Number of downloads
         - likes: Number of likes/upvotes
         - configs: List of available configuration names
-        
+
     Status Codes:
         200: Success
         400: Missing dataset_id parameter
         500: Error retrieving dataset metadata
     """
     dataset_id = request.args.get('dataset_id')
-    
+
     if not dataset_id:
         return jsonify({'error': 'dataset_id parameter is required'}), 400
-    
+
     try:
-        response = requests.get(f'https://huggingface.co/api/datasets/{dataset_id}')
-        
+        response = requests.get(
+            f'https://huggingface.co/api/datasets/{dataset_id}')
+
         if response.status_code != 200:
             return jsonify({'error': f'Dataset not found or API returned status code {response.status_code}'}), 404
-            
+
         dataset_info = response.json()
-        
+
         configs = get_dataset_config_names(dataset_id)
-        
+
         result = {
             'id': dataset_info.get('id'),
             'author': dataset_info.get('author'),
@@ -665,35 +663,152 @@ def retrieve_hf_dataset():
             'likes': dataset_info.get('likes'),
             'configs': configs
         }
-        
+
         return jsonify(result)
-    
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/retrieve-kaggle-dataset', methods=["GET"])
+# @cache.memoize(timeout=1800)
+def retrieve_kaggle_dataset():
+    """
+    Flask endpoint that retrieves metadata for a specific Kaggle dataset.
+
+    This endpoint retrieves detailed metadata about a Kaggle dataset including its
+    title, owner, size, last update time, download count, vote count, and description.
+    It can handle both standard format 'username/dataset-slug' and plain dataset names.
+
+    HTTP Method: GET
+    Route: /api/retrieve-kaggle-dataset
+
+    Request Headers:
+        X-Kaggle-Username: Kaggle username for authentication
+        X-Kaggle-Key: Kaggle API key for authentication
+
+    Query Parameters:
+        dataset_id (str, required): The Kaggle dataset identifier in format 'username/dataset-name'
+                                    OR just the dataset name/title
+
+    Returns:
+        JSON response containing dataset metadata
+    """
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+    dataset_id = request.args.get('dataset_id')
+
+    if not dataset_id:
+        return jsonify({'error': 'dataset_id parameter is required'}), 400
+
+    if not username or not key:
+        return jsonify({'error': 'Kaggle username and API key are required in headers'}), 401
+
+    try:
+        authenticate_kaggle(username, key)
+
+        if '/' in dataset_id:
+            parts = dataset_id.split('/')
+            if len(parts) != 2:
+                return jsonify({
+                    'error': 'Invalid dataset_id format. Expected format: username/dataset-slug',
+                    'example': 'netflix-inc/netflix-prize-data'
+                }), 400
+
+            owner, slug = parts
+            
+            try:
+                dataset = kaggle_api.dataset_metadata(owner, slug)
+                
+                result = {
+                    'id': dataset_id,
+                    'title': dataset['title'],
+                    'owner': dataset['ownerName'],
+                    'url': f'https://www.kaggle.com/datasets/{dataset_id}',
+                    'size': dataset.get('totalBytes', 'Unknown'),
+                    'lastUpdated': dataset.get('lastUpdated', 'Unknown'),
+                    'downloadCount': dataset.get('downloadCount', 0),
+                    'voteCount': dataset.get('voteCount', 0),
+                    'description': dataset.get('description', '')
+                }
+                
+                return jsonify(result)
+            except Exception:
+                datasets = list(kaggle_api.dataset_list(search=slug, user=owner))
+                
+                dataset = None
+                for ds in datasets:
+                    if ds.ref.lower() == dataset_id.lower():
+                        dataset = ds
+                        break
+                
+                if not dataset:
+                    return jsonify({
+                        'error': f'Dataset not found: {dataset_id}',
+                        'suggestion': 'Try using just the dataset name or check the spelling'
+                    }), 404
+        else:
+            datasets = list(kaggle_api.dataset_list(search=dataset_id))
+            
+            dataset = None
+            for ds in datasets:
+                if ds.title.lower() == dataset_id.lower():
+                    dataset = ds
+                    break
+            
+            if not dataset and datasets:
+                dataset = datasets[0]
+                
+            if not dataset:
+                return jsonify({
+                    'error': f'No datasets found matching: {dataset_id}',
+                    'suggestion': 'Try using more specific search terms'
+                }), 404
+
+        result = {
+            'id': dataset.ref,
+            'title': dataset.title,
+            'owner': dataset.ownerName,
+            'url': f'https://www.kaggle.com/datasets/{dataset.ref}',
+            'size': dataset.size,
+            'lastUpdated': dataset.lastUpdated,
+            'downloadCount': dataset.downloadCount,
+            'voteCount': dataset.voteCount,
+            'description': dataset.description
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'suggestion': 'Make sure your Kaggle credentials are correct'
+        }), 500
+
 
 @cache.memoize(timeout=1800)
 def fetch_config_info(dataset_id, config):
     """
     Retrieves detailed configuration information for a specific Hugging Face dataset configuration.
-    
+
     This function loads a dataset builder for the specified dataset ID and configuration,
     then extracts metadata including total size and number of examples. Results are cached
     for 30 minutes (1800 seconds) to improve performance and reduce API load.
-    
+
     Args:
         dataset_id (str): The Hugging Face dataset identifier (e.g., 'squad', 'glue')
         config (str): The specific configuration name to fetch information for
-            
+
     Returns:
         dict: A dictionary containing configuration information with the following keys:
             - name: Configuration name
             - total_size_bytes: Total size of the dataset configuration in bytes
             - total_examples: Total number of examples across all splits
-            
+
             If an error occurs, the dictionary will contain:
             - name: Configuration name
             - error: Error message describing what went wrong
-            
+
     Note:
         - Results are cached for 1800 seconds (30 minutes) to improve performance
         - This function is primarily used internally by search endpoints that need
@@ -728,18 +843,18 @@ def fetch_config_info(dataset_id, config):
 def search_huggingface_endpoint():
     """
     Flask endpoint that searches for Hugging Face datasets matching a query string.
-    
+
     This endpoint allows optional authentication with a Hugging Face token and supports
     different levels of configuration detail in the response. It can fetch basic dataset
     information or include detailed configuration metadata using parallel processing
     for better performance.
-    
+
     HTTP Method: GET
     Route: /api/search/huggingface
-    
+
     Request Headers:
         X-HF-Token (optional): Hugging Face API token for accessing private datasets
-        
+
     Query Parameters:
         query (str, required): Search term to find matching datasets
         limit (int, optional): Maximum number of datasets to return. Defaults to 5.
@@ -747,7 +862,7 @@ def search_huggingface_endpoint():
             Defaults to false.
         config_detail (str, optional): Level of configuration detail to include. 
             Options: 'none', 'basic', 'full'. Defaults to 'basic'.
-            
+
     Returns:
         JSON response containing either:
         - A list of formatted Hugging Face datasets matching the search query
@@ -755,7 +870,7 @@ def search_huggingface_endpoint():
           the config_detail level
         - An error message with appropriate HTTP status code (400 for missing query,
           500 for other errors)
-        
+
     Note:
         - For 'full' config_detail, only processes up to 5 configurations per dataset
         - Uses concurrent processing to improve performance when fetching configuration details
@@ -786,21 +901,21 @@ def search_huggingface_endpoint():
     def process_dataset_configs(dataset):
         """
     Processes configuration information for a Hugging Face dataset.
-    
+
     This helper function retrieves configuration names for a dataset and, based on the
     specified detail level, fetches additional metadata for each configuration. It handles
     error cases and limits the number of configurations processed for performance reasons.
-    
+
     Args:
         dataset (dict): A dictionary containing dataset information, including the 'id' key
-            
+
     Returns:
         dict: The enhanced dataset dictionary with added configuration information:
             - configs: List of configuration objects with metadata based on detail level
             - total_configs: Total number of configs if there are more than displayed
             - additional_configs: Number of configurations not processed when using full detail
             - configs_error: Error message if configuration processing failed
-            
+
     Note:
         - For 'basic' detail level, only configuration names are included
         - For 'full' detail level, uses parallel processing to fetch detailed information
@@ -858,35 +973,35 @@ def search_huggingface_endpoint():
 def search_all_datasets():
     """
     Flask endpoint that searches for datasets across multiple sources based on a query string.
-    
+
     This unified search endpoint allows searching for datasets on both Kaggle and Hugging Face 
     simultaneously or selectively, based on the 'source' parameter. It handles authentication 
     for both platforms and returns results from each requested source.
-    
+
     HTTP Method: GET
     Route: /api/search
-    
+
     Request Headers:
         X-Kaggle-Username (optional): Kaggle username for authentication
         X-Kaggle-Key (optional): Kaggle API key for authentication
         X-HF-Token (optional): Hugging Face API token for accessing private datasets
-        
+
     Query Parameters:
         query (str, required): Search term to find matching datasets
         source (str, optional): Source to search in. Defaults to 'all'.
             Valid options are: 'all', 'kaggle', 'huggingface'
         limit (int, optional): Maximum number of datasets to return per source. Defaults to 5.
-            
+
     Returns:
         JSON response containing:
         - A dictionary with keys for each requested source ('kaggle', 'huggingface')
         - Each source key contains either a list of matching datasets or an error message
         - For Kaggle, returns an error if credentials are not provided
-        
+
     Status Codes:
         200: Success
         400: Missing query parameter
-        
+
     Note:
         - Authentication is required for Kaggle search, optional for Hugging Face
         - Results utilize the cached search functions for better performance
