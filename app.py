@@ -38,8 +38,6 @@ def authenticate_kaggle(username, key):
         The credentials are stored as environment variables 'KAGGLE_USERNAME' and 'KAGGLE_KEY'
         The kaggle_api object must be initialized before calling this function
     """
-    os.environ['KAGGLE_USERNAME'] = username
-    os.environ['KAGGLE_KEY'] = key
     kaggle_api.authenticate()
 
 
