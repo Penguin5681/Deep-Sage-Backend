@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request
 import os
 import requests
-from kaggle.api.kaggle_api_extended import KaggleApi
 from huggingface_hub import HfApi
 from flask_caching import Cache
 from datasets import get_dataset_config_names, load_dataset
@@ -12,60 +11,30 @@ load_dotenv()
 
 cache_config = {
     "CACHE_TYPE": "SimpleCache",
-    "CACHE_DEFAULT_TIMEOUT": 300  # The cached results will be valid for 5 mins
+    "CACHE_DEFAULT_TIMEOUT": 300  
 }
 
 app = Flask(__name__)
 
 cache = Cache(app, config=cache_config)
 
-kaggle_api = KaggleApi()
 hf_api = HfApi()
 
+os.environ['KAGGLE_USERNAME'] = os.getenv('KAGGLE_USERNAME')
+os.environ['KAGGLE_KEY'] = os.getenv('KAGGLE_KEY')
 
-def authenticate_kaggle(username, key):
+from kaggle.api.kaggle_api_extended import KaggleApi
+
+def authenticate_kaggle(kaggle_username, kaggle_key):
     """
-    Authenticates the Kaggle API with the provided credentials.
-
-    This function sets the necessary environment variables for Kaggle API authentication
-    and initializes the API connection. It must be called before making any Kaggle API requests.
-
-    Args:
-        username (str): The Kaggle username to use for authentication
-        key (str): The Kaggle API key associated with the username
-
-    Returns:
-        None
-
-    Note:
-        The credentials are stored as environment variables 'KAGGLE_USERNAME' and 'KAGGLE_KEY'
-        The kaggle_api object must be initialized before calling this function
+    Authenticates the Kaggle API using environment variables.
     """
-    import json
-    
-    username = username or os.environ.get('KAGGLE_USERNAME')
-    key = key or os.environ.get('KAGGLE_KEY')
-    
-    if not username or not key:
-        raise ValueError("Kaggle credentials not found. Provide them as arguments or set KAGGLE_USERNAME and KAGGLE_KEY environment variables.")
-    
-    os.environ["KAGGLE_USERNAME"] = username
-    os.environ["KAGGLE_KEY"] = key
-    
-    kaggle_dir = os.path.expanduser("~/.kaggle")
-    os.makedirs(kaggle_dir, exist_ok=True)
-    
-    kaggle_config_path = os.path.join(kaggle_dir, "kaggle.json")
-    with open(kaggle_config_path, "w") as f:
-        json.dump({"username": username, "key": key}, f)
-    
-    try:
-        os.chmod(kaggle_config_path, 0o600)
-    except:
-        pass
-    
-    global kaggle_api
-    kaggle_api.authenticate()
+    if not kaggle_username or not kaggle_key:
+        raise ValueError("KAGGLE_USERNAME and KAGGLE_KEY must be set in environment variables")
+
+    api = KaggleApi()
+    api.authenticate()
+    return api
 
 
 def get_kaggle_datasets(limit=5, sort_by='hottest'):
