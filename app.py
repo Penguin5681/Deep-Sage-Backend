@@ -1,3 +1,4 @@
+import datetime
 from flask import Flask, jsonify, request
 import os
 import requests
@@ -24,6 +25,7 @@ os.environ['KAGGLE_USERNAME'] = os.getenv('KAGGLE_USERNAME')
 os.environ['KAGGLE_KEY'] = os.getenv('KAGGLE_KEY')
 
 from kaggle.api.kaggle_api_extended import KaggleApi
+kaggle_api = KaggleApi()
 
 def authenticate_kaggle(kaggle_username, kaggle_key):
     """
@@ -32,9 +34,8 @@ def authenticate_kaggle(kaggle_username, kaggle_key):
     if not kaggle_username or not kaggle_key:
         raise ValueError("KAGGLE_USERNAME and KAGGLE_KEY must be set in environment variables")
 
-    api = KaggleApi()
-    api.authenticate()
-    return api
+    kaggle_api.authenticate()
+    return kaggle_api
 
 
 def get_kaggle_datasets(limit=5, sort_by='hottest'):
@@ -1137,6 +1138,31 @@ def get_suggestions():
 
     return jsonify(result)
 
+@app.route('/health', methods=['GET'])
+def health_check():
+        """
+        Flask endpoint that provides a health check for the service.
+        
+        This endpoint returns basic information about the service status and can be used
+        by monitoring tools to verify that the API is operational.
+        
+        HTTP Method: GET
+        Route: /health
+        
+        Returns:
+            JSON response containing:
+            - status: 'ok' if the service is running properly
+            - version: API version information
+            - timestamp: Current server time
+            
+        Status Code:
+            200: Service is healthy and operational
+        """
+        return jsonify({
+            'status': 'ok',
+            'version': '1.0.0',
+            'timestamp': datetime.datetime.now().isoformat()
+        })
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000, host='0.0.0.0')
