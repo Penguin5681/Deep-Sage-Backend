@@ -6,6 +6,9 @@ from huggingface_hub import HfApi
 from flask_caching import Cache
 from datasets import get_dataset_config_names, load_dataset
 import concurrent.futures
+from dotenv import load_dotenv
+
+load_dotenv()
 
 cache_config = {
     "CACHE_TYPE": "SimpleCache",
@@ -38,6 +41,30 @@ def authenticate_kaggle(username, key):
         The credentials are stored as environment variables 'KAGGLE_USERNAME' and 'KAGGLE_KEY'
         The kaggle_api object must be initialized before calling this function
     """
+    import json
+    
+    username = username or os.environ.get('KAGGLE_USERNAME')
+    key = key or os.environ.get('KAGGLE_KEY')
+    
+    if not username or not key:
+        raise ValueError("Kaggle credentials not found. Provide them as arguments or set KAGGLE_USERNAME and KAGGLE_KEY environment variables.")
+    
+    os.environ["KAGGLE_USERNAME"] = username
+    os.environ["KAGGLE_KEY"] = key
+    
+    kaggle_dir = os.path.expanduser("~/.kaggle")
+    os.makedirs(kaggle_dir, exist_ok=True)
+    
+    kaggle_config_path = os.path.join(kaggle_dir, "kaggle.json")
+    with open(kaggle_config_path, "w") as f:
+        json.dump({"username": username, "key": key}, f)
+    
+    try:
+        os.chmod(kaggle_config_path, 0o600)
+    except:
+        pass
+    
+    global kaggle_api
     kaggle_api.authenticate()
 
 
