@@ -8,6 +8,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - FLASK_DEBUG=1
+    volumes:
+      - ./downloads:/app/downloads  
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s

@@ -1,3 +1,4 @@
+from kaggle.api.kaggle_api_extended import KaggleApi
 import datetime
 from flask import Flask, jsonify, request
 import os
@@ -12,7 +13,7 @@ load_dotenv()
 
 cache_config = {
     "CACHE_TYPE": "SimpleCache",
-    "CACHE_DEFAULT_TIMEOUT": 300  
+    "CACHE_DEFAULT_TIMEOUT": 300
 }
 
 app = Flask(__name__)
@@ -24,15 +25,16 @@ hf_api = HfApi()
 os.environ['KAGGLE_USERNAME'] = os.getenv('KAGGLE_USERNAME')
 os.environ['KAGGLE_KEY'] = os.getenv('KAGGLE_KEY')
 
-from kaggle.api.kaggle_api_extended import KaggleApi
 kaggle_api = KaggleApi()
+
 
 def authenticate_kaggle(kaggle_username, kaggle_key):
     """
     Authenticates the Kaggle API using environment variables.
     """
     if not kaggle_username or not kaggle_key:
-        raise ValueError("KAGGLE_USERNAME and KAGGLE_KEY must be set in environment variables")
+        raise ValueError(
+            "KAGGLE_USERNAME and KAGGLE_KEY must be set in environment variables")
 
     kaggle_api.authenticate()
     return kaggle_api
@@ -388,9 +390,16 @@ def download_dataset():
     if not source or not dataset_id:
         return jsonify({'error': 'Source and dataset_id are required'}), 400
 
-    os.makedirs(download_path, exist_ok=True)
+    if not os.path.isabs(download_path):
+        download_path = os.path.join('/app', download_path)
 
     try:
+
+        os.makedirs(download_path, exist_ok=True)
+
+        if not os.access(download_path, os.W_OK):
+            return jsonify({'error': f'Directory {download_path} is not writable'}), 500
+
         if source.lower() == 'kaggle':
             username = request.headers.get('X-Kaggle-Username')
             key = request.headers.get('X-Kaggle-Key')
@@ -411,37 +420,76 @@ def download_dataset():
             })
 
         elif source.lower() == 'huggingface':
-            if config:
-                dataset = load_dataset(dataset_id, config)
-            else:
-                dataset = load_dataset(dataset_id)
+            try:
+                print(f"Loading dataset {dataset_id} with config {config}")
 
-            base_filename = f"{dataset_id.replace('/', '_')}"
+                if config:
+                    dataset = load_dataset(
+                        dataset_id, config, trust_remote_code=True)
+                else:
+                    dataset = load_dataset(dataset_id, trust_remote_code=True)
 
-            if isinstance(dataset, dict):
+                base_filename = f"{dataset_id.replace('/', '_')}"
                 files = []
-                for split_name, split_dataset in dataset.items():
-                    file_path = os.path.join(
-                        download_path, f"{base_filename}_{split_name}.csv")
-                    split_dataset.to_pandas().to_csv(file_path, index=False)
-                    files.append(file_path)
-            else:
-                file_path = os.path.join(download_path, f"{base_filename}.csv")
-                dataset.to_pandas().to_csv(file_path, index=False)
-                files = [file_path]
 
-            return jsonify({
-                'success': True,
-                'message': f'Dataset downloaded to {download_path}',
-                'path': download_path,
-                'files': files
-            })
+                if isinstance(dataset, dict):
+                    for split_name, split_dataset in dataset.items():
+                        file_path = os.path.join(
+                            download_path, f"{base_filename}_{split_name}.csv")
+                        print(f"Saving split {split_name} to {file_path}")
+                        df = split_dataset.to_pandas()
+                        df.to_csv(file_path, index=False)
+                        files.append(file_path)
+                else:
+                    file_path = os.path.join(
+                        download_path, f"{base_filename}.csv")
+                    print(f"Saving dataset to {file_path}")
+                    df = dataset.to_pandas()
+                    df.to_csv(file_path, index=False)
+                    files.append(file_path)
+
+                return jsonify({
+                    'success': True,
+                    'message': f'Dataset downloaded to {download_path}',
+                    'path': download_path,
+                    'files': files
+                })
+            except Exception as e:
+                print(f"Error processing HuggingFace dataset: {str(e)}")
+
+                try:
+                    from huggingface_hub import snapshot_download
+
+                    output_dir = os.path.join(
+                        download_path, dataset_id.replace('/', '_'))
+                    os.makedirs(output_dir, exist_ok=True)
+
+                    downloaded_path = snapshot_download(
+                        repo_id=dataset_id,
+                        repo_type="dataset",
+                        local_dir=output_dir
+                    )
+
+                    return jsonify({
+                        'success': True,
+                        'message': f'Dataset downloaded using alternative method to {downloaded_path}',
+                        'path': downloaded_path,
+                        'files': [downloaded_path]
+                    })
+                except Exception as alt_error:
+                    print(
+                        f"Alternative download also failed: {str(alt_error)}")
+                    raise Exception(
+                        f"Failed to download dataset: {str(e)}, alternative method error: {str(alt_error)}")
 
         else:
             return jsonify({'error': 'Invalid source. Use "kaggle" or "huggingface"'}), 400
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Download error: {str(e)}\n{error_details}")
+        return jsonify({'error': str(e), 'details': error_details}), 500
 
 
 @cache.memoize(timeout=300)
@@ -666,7 +714,6 @@ def retrieve_hf_dataset():
 
 
 @app.route('/api/retrieve-kaggle-dataset', methods=["GET"])
-# @cache.memoize(timeout=1800)
 def retrieve_kaggle_dataset():
     """
     Flask endpoint that retrieves metadata for a specific Kaggle dataset.
@@ -711,10 +758,10 @@ def retrieve_kaggle_dataset():
                 }), 400
 
             owner, slug = parts
-            
+
             try:
                 dataset = kaggle_api.dataset_metadata(owner, slug)
-                
+
                 result = {
                     'id': dataset_id,
                     'title': dataset['title'],
@@ -726,17 +773,18 @@ def retrieve_kaggle_dataset():
                     'voteCount': dataset.get('voteCount', 0),
                     'description': dataset.get('description', '')
                 }
-                
+
                 return jsonify(result)
             except Exception:
-                datasets = list(kaggle_api.dataset_list(search=slug, user=owner))
-                
+                datasets = list(kaggle_api.dataset_list(
+                    search=slug, user=owner))
+
                 dataset = None
                 for ds in datasets:
                     if ds.ref.lower() == dataset_id.lower():
                         dataset = ds
                         break
-                
+
                 if not dataset:
                     return jsonify({
                         'error': f'Dataset not found: {dataset_id}',
@@ -744,16 +792,16 @@ def retrieve_kaggle_dataset():
                     }), 404
         else:
             datasets = list(kaggle_api.dataset_list(search=dataset_id))
-            
+
             dataset = None
             for ds in datasets:
                 if ds.title.lower() == dataset_id.lower():
                     dataset = ds
                     break
-            
+
             if not dataset and datasets:
                 dataset = datasets[0]
-                
+
             if not dataset:
                 return jsonify({
                     'error': f'No datasets found matching: {dataset_id}',
@@ -876,7 +924,7 @@ def search_huggingface_endpoint():
     include_configs = request.args.get(
         'include_configs', 'false').lower() == 'true'
     config_detail_level = request.args.get(
-        'config_detail', 'basic')  # Options: none, basic, full
+        'config_detail', 'basic')
 
     if not query:
         return jsonify({'error': 'Query parameter is required'}), 400
@@ -1033,23 +1081,23 @@ def search_all_datasets():
 def get_dataset_suggestions(query, source, limit=5):
     """
     Retrieves dataset name suggestions based on a search query from a specified source.
-    
+
     This function fetches dataset titles or IDs that match the provided query from either
     Kaggle or Hugging Face. Results are cached for 5 minutes to improve performance and
     reduce API calls.
-    
+
     Args:
         query (str): Search query to find matching datasets
         source (str): Source to search for suggestions, either 'kaggle' or 'huggingface'
         limit (int, optional): Maximum number of suggestions to return. Defaults to 5.
-            
+
     Returns:
         list or dict: If successful, returns a list of dataset names/titles that match
             the search query. For Kaggle, returns dataset titles. For Hugging Face,
             returns dataset IDs.
-            
+
             If an error occurs, returns a dictionary with an 'error' key.
-            
+
     Note:
         - For Kaggle source, requires prior authentication with the Kaggle API
         - Results are cached for 300 seconds (5 minutes) to improve performance
@@ -1081,32 +1129,32 @@ def get_dataset_suggestions(query, source, limit=5):
 def get_suggestions():
     """
     Flask endpoint that provides dataset name suggestions based on a search query.
-    
+
     This endpoint provides autocomplete/typeahead functionality for dataset names from
     either Kaggle, Hugging Face, or both sources. It handles authentication for both
     platforms and returns dataset titles or IDs that match the query string.
-    
+
     HTTP Method: GET
     Route: /api/suggestions
-    
+
     Request Headers:
         X-Kaggle-Username (optional): Kaggle username for authentication
         X-Kaggle-Key (optional): Kaggle API key for authentication
         X-HF-Token (optional): Hugging Face API token for authentication
-        
+
     Query Parameters:
         query (str, required): Search term to find matching dataset names
         source (str, optional): Source to get suggestions from. Defaults to 'all'.
             Valid options are: 'all', 'kaggle', 'huggingface'
         limit (int, optional): Maximum number of suggestions to return per source. Defaults to 5.
-            
+
     Returns:
         JSON response containing:
         - A dictionary with keys for each requested source ('kaggle', 'huggingface')
         - Each source key contains either a list of dataset names or an error message
         - Returns empty array if query length is less than 1 character
         - For Kaggle, returns an error if credentials are not provided
-        
+
     Note:
         - Authentication is required for Kaggle suggestions, optional for Hugging Face
         - Results are cached for 5 minutes to improve performance
@@ -1138,31 +1186,33 @@ def get_suggestions():
 
     return jsonify(result)
 
+
 @app.route('/health', methods=['GET'])
 def health_check():
-        """
-        Flask endpoint that provides a health check for the service.
-        
-        This endpoint returns basic information about the service status and can be used
-        by monitoring tools to verify that the API is operational.
-        
-        HTTP Method: GET
-        Route: /health
-        
-        Returns:
-            JSON response containing:
-            - status: 'ok' if the service is running properly
-            - version: API version information
-            - timestamp: Current server time
-            
-        Status Code:
-            200: Service is healthy and operational
-        """
-        return jsonify({
-            'status': 'ok',
-            'version': '1.0.0',
-            'timestamp': datetime.datetime.now().isoformat()
-        })
+    """
+    Flask endpoint that provides a health check for the service.
+
+    This endpoint returns basic information about the service status and can be used
+    by monitoring tools to verify that the API is operational.
+
+    HTTP Method: GET
+    Route: /health
+
+    Returns:
+        JSON response containing:
+        - status: 'ok' if the service is running properly
+        - version: API version information
+        - timestamp: Current server time
+
+    Status Code:
+        200: Service is healthy and operational
+    """
+    return jsonify({
+        'status': 'ok',
+        'version': '1.0.0',
+        'timestamp': datetime.datetime.now().isoformat()
+    })
+
 
 if __name__ == '__main__':
     app.run(debug=False, port=5000, host='0.0.0.0')
