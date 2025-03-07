@@ -2,11 +2,7 @@ from kaggle.api.kaggle_api_extended import KaggleApi
 import datetime
 from flask import Flask, jsonify, request
 import os
-import requests
-from huggingface_hub import HfApi
 from flask_caching import Cache
-from datasets import get_dataset_config_names, load_dataset
-import concurrent.futures
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,8 +15,6 @@ cache_config = {
 app = Flask(__name__)
 
 cache = Cache(app, config=cache_config)
-
-hf_api = HfApi()
 
 os.environ['KAGGLE_USERNAME'] = os.getenv('KAGGLE_USERNAME')
 os.environ['KAGGLE_KEY'] = os.getenv('KAGGLE_KEY')
@@ -96,65 +90,6 @@ def get_kaggle_datasets(limit=5, sort_by='hottest'):
         return {'error': str(e)}
 
 
-def get_huggingface_datasets(limit=5, sort_by='downloads'):
-    """
-    Retrieves a list of datasets from Hugging Face and formats them into a standardized structure.
-
-    This function fetches datasets from the Hugging Face API based on the specified sorting criteria
-    and limits the number of results. It validates the sorting option against allowed values
-    and handles any exceptions that may occur during the API call.
-
-    Args:
-        limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-        sort_by (str, optional): Criteria to sort datasets by. Defaults to 'downloads'.
-            Valid options are: 'downloads', 'trending', 'modified'.
-
-    Returns:
-        list or dict: If successful, returns a list of dictionaries containing formatted dataset
-            information with the following keys:
-            - id: Dataset identifier
-            - author: Username of dataset author
-            - url: Full URL to the dataset on Hugging Face
-            - downloads: Number of downloads
-            - likes: Number of likes/upvotes
-            - lastModified: When the dataset was last modified
-            - tags: List of dataset tags
-            - description: Dataset description
-
-            If an error occurs or sort_by is invalid, returns a dictionary with an 'error' key.
-    """
-    try:
-        valid_sorts = ['downloads', 'trending', 'modified']
-        if sort_by not in valid_sorts:
-            return {'error': f'Invalid sort option. Choose from: {valid_sorts}'}
-
-        response = requests.get(
-            'https://huggingface.co/api/datasets',
-            params={'sort': sort_by, 'limit': limit}
-        )
-
-        if response.status_code == 200:
-            datasets = response.json()
-        else:
-            return {'error': f'API returned status code {response.status_code}'}
-
-        formatted_datasets = []
-        for dataset in datasets:
-            formatted_datasets.append({
-                'id': dataset.get('id'),
-                'author': dataset.get('author'),
-                'url': f"https://huggingface.co/datasets/{dataset.get('id')}",
-                'downloads': dataset.get('downloads'),
-                'likes': dataset.get('likes'),
-                'lastModified': dataset.get('lastModified'),
-                'tags': dataset.get('tags', []),
-                'description': dataset.get('description', '')
-            })
-        return formatted_datasets
-    except Exception as e:
-        return {'error': str(e)}
-
-
 @app.route('/api/datasets/kaggle', methods=['GET'])
 @cache.memoize(300)
 def get_kaggle_datasets_endpoint():
@@ -200,45 +135,6 @@ def get_kaggle_datasets_endpoint():
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/datasets/huggingface', methods=['GET'])
-@cache.memoize(300)
-def get_huggingface_datasets_endpoint():
-    """
-    Flask endpoint that retrieves Hugging Face datasets based on specified criteria.
-
-    This endpoint allows optional authentication with a Hugging Face token provided in the
-    request headers. It extracts query parameters for limit and sorting criteria, then
-    calls the get_huggingface_datasets function to fetch and format dataset information.
-
-    HTTP Method: GET
-    Route: /api/datasets/huggingface
-
-    Request Headers:
-        X-HF-Token (optional): Hugging Face API token for accessing private or gated datasets
-
-    Query Parameters:
-        limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-        sort_by (str, optional): Criteria to sort datasets by. Defaults to 'downloads'.
-            Valid options are: 'downloads', 'trending', 'modified'.
-
-    Returns:
-        JSON response containing either:
-        - A list of formatted Hugging Face datasets
-        - An error message with appropriate HTTP status code
-
-    Note:
-        Unlike the Kaggle endpoint, authentication is optional for this endpoint.
-    """
-    token = request.headers.get('X-HF-Token')
-    if token:
-        os.environ['HF_TOKEN'] = token
-
-    limit = int(request.args.get('limit', 5))
-    sort_by = request.args.get('sort_by', 'downloads')
-    result = get_huggingface_datasets(limit, sort_by)
-    return jsonify(result)
 
 
 @app.route('/api/datasets', methods=['GET'])
@@ -290,92 +186,7 @@ def get_datasets():
         else:
             result['kaggle'] = {'error': 'Kaggle credentials required'}
 
-    if source.lower() in ['all', 'huggingface']:
-        token = request.headers.get('X-HF-Token')
-        if token:
-            os.environ['HF_TOKEN'] = token
-        sort_by = request.args.get('hf_sort', 'downloads')
-        result['huggingface'] = get_huggingface_datasets(limit, sort_by)
-
     return jsonify(result)
-
-
-@app.route('/api/datasets/configs', methods=['GET'])
-@cache.memoize(300)
-def get_dataset_configs():
-    dataset_id = request.args.get('dataset_id')
-    if not dataset_id:
-        return jsonify({'error': 'dataset_id parameter is required'}), 400
-
-    try:
-        configs = get_dataset_config_names(dataset_id)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_config = {
-                executor.submit(get_config_info, dataset_id, config): config
-                for config in configs
-            }
-
-            configs_with_size = []
-            for future in concurrent.futures.as_completed(future_to_config, timeout=30):
-                config = future_to_config[future]
-                try:
-                    result = future.result()
-                    configs_with_size.append(result)
-                except Exception as e:
-                    configs_with_size.append({
-                        'name': config,
-                        'error': f"Couldn't fetch size: {str(e)}"
-                    })
-
-        return jsonify({
-            'dataset_id': dataset_id,
-            'configs': configs_with_size
-        })
-    except concurrent.futures.TimeoutError:
-        return jsonify({
-            'error': 'Request timed out while fetching configurations',
-            'partial_results': configs_with_size
-        }), 408
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-def get_config_info(dataset_id, config):
-    """Helper function to get info for a single config"""
-    try:
-        from datasets import load_dataset_builder
-        builder = load_dataset_builder(dataset_id, config)
-        info = builder.info
-
-        total_size = 0
-        num_examples = 0
-        splits = {}
-
-        if hasattr(info, 'splits') and info.splits:
-            for split_name, split_info in info.splits.items():
-                split_size = getattr(split_info, 'num_bytes', 0)
-                split_examples = getattr(split_info, 'num_examples', 0)
-                total_size += split_size
-                num_examples += split_examples
-                splits[split_name] = {
-                    'size_bytes': split_size,
-                    'num_examples': split_examples
-                }
-
-        return {
-            'name': config,
-            'total_size_bytes': total_size,
-            'total_examples': num_examples,
-            'splits': splits,
-            'description': getattr(info, 'description', ''),
-            'features': str(getattr(info, 'features', {}))
-        }
-    except Exception as e:
-        return {
-            'name': config,
-            'error': f"Couldn't fetch size: {str(e)}"
-        }
 
 
 @app.route('/api/datasets/download', methods=['POST'])
@@ -385,8 +196,6 @@ def download_dataset():
     source = data.get('source')
     dataset_id = data.get('dataset_id')
     download_path = data.get('path', './downloads')
-    config = data.get('config')
-
     if not source or not dataset_id:
         return jsonify({'error': 'Source and dataset_id are required'}), 400
 
@@ -394,7 +203,6 @@ def download_dataset():
         download_path = os.path.join('/app', download_path)
 
     try:
-
         os.makedirs(download_path, exist_ok=True)
 
         if not os.access(download_path, os.W_OK):
@@ -418,72 +226,8 @@ def download_dataset():
                 'message': f'Dataset downloaded to {download_path}',
                 'path': download_path
             })
-
-        elif source.lower() == 'huggingface':
-            try:
-                print(f"Loading dataset {dataset_id} with config {config}")
-
-                if config:
-                    dataset = load_dataset(
-                        dataset_id, config, trust_remote_code=True)
-                else:
-                    dataset = load_dataset(dataset_id, trust_remote_code=True)
-
-                base_filename = f"{dataset_id.replace('/', '_')}"
-                files = []
-
-                if isinstance(dataset, dict):
-                    for split_name, split_dataset in dataset.items():
-                        file_path = os.path.join(
-                            download_path, f"{base_filename}_{split_name}.csv")
-                        print(f"Saving split {split_name} to {file_path}")
-                        df = split_dataset.to_pandas()
-                        df.to_csv(file_path, index=False)
-                        files.append(file_path)
-                else:
-                    file_path = os.path.join(
-                        download_path, f"{base_filename}.csv")
-                    print(f"Saving dataset to {file_path}")
-                    df = dataset.to_pandas()
-                    df.to_csv(file_path, index=False)
-                    files.append(file_path)
-
-                return jsonify({
-                    'success': True,
-                    'message': f'Dataset downloaded to {download_path}',
-                    'path': download_path,
-                    'files': files
-                })
-            except Exception as e:
-                print(f"Error processing HuggingFace dataset: {str(e)}")
-
-                try:
-                    from huggingface_hub import snapshot_download
-
-                    output_dir = os.path.join(
-                        download_path, dataset_id.replace('/', '_'))
-                    os.makedirs(output_dir, exist_ok=True)
-
-                    downloaded_path = snapshot_download(
-                        repo_id=dataset_id,
-                        repo_type="dataset",
-                        local_dir=output_dir
-                    )
-
-                    return jsonify({
-                        'success': True,
-                        'message': f'Dataset downloaded using alternative method to {downloaded_path}',
-                        'path': downloaded_path,
-                        'files': [downloaded_path]
-                    })
-                except Exception as alt_error:
-                    print(
-                        f"Alternative download also failed: {str(alt_error)}")
-                    raise Exception(
-                        f"Failed to download dataset: {str(e)}, alternative method error: {str(alt_error)}")
-
         else:
-            return jsonify({'error': 'Invalid source. Use "kaggle" or "huggingface"'}), 400
+            return jsonify({'error': 'Invalid source. Use "kaggle"'}), 400
 
     except Exception as e:
         import traceback
@@ -544,65 +288,6 @@ def search_kaggle_datasets(query, limit=5):
         return {'error': str(e)}
 
 
-@cache.memoize(timeout=300)
-def search_huggingface_datasets(query, limit=5):
-    """
-    Searches Hugging Face datasets that match a query string and formats results.
-
-    This function searches the Hugging Face API for datasets matching the provided query
-    and formats them into a standardized structure. Results are cached for 5 minutes
-    to improve performance and reduce API calls.
-
-    Args:
-        query (str): Search query to find datasets
-        limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-
-    Returns:
-        list or dict: If successful, returns a list of dictionaries containing formatted dataset
-            information with the following keys:
-            - id: Dataset identifier
-            - author: Username of dataset author
-            - url: Full URL to the dataset on Hugging Face
-            - downloads: Number of downloads
-            - likes: Number of likes/upvotes
-            - lastModified: When the dataset was last modified
-            - tags: List of dataset tags
-            - description: Dataset description
-
-            If an error occurs, returns a dictionary with an 'error' key.
-
-    Note:
-        - Results are cached for 300 seconds (5 minutes) to improve performance.
-        - Authentication is optional but may be necessary for accessing private datasets.
-    """
-    try:
-        response = requests.get(
-            'https://huggingface.co/api/datasets',
-            params={'search': query, 'limit': limit}
-        )
-
-        if response.status_code == 200:
-            datasets = response.json()
-        else:
-            return {'error': f'API returned status code {response.status_code}'}
-
-        formatted_datasets = []
-        for dataset in datasets:
-            formatted_datasets.append({
-                'id': dataset.get('id'),
-                'author': dataset.get('author'),
-                'url': f"https://huggingface.co/datasets/{dataset.get('id')}",
-                'downloads': dataset.get('downloads'),
-                'likes': dataset.get('likes'),
-                'lastModified': dataset.get('lastModified'),
-                'tags': dataset.get('tags', []),
-                'description': dataset.get('description', '')
-            })
-        return formatted_datasets
-    except Exception as e:
-        return {'error': str(e)}
-
-
 @app.route('/api/search/kaggle', methods=['GET'])
 def search_kaggle_endpoint():
     """
@@ -648,67 +333,6 @@ def search_kaggle_endpoint():
         limit = int(request.args.get('limit', 5))
         result = search_kaggle_datasets(query, limit)
         return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/retrieve-dataset', methods=["GET"])
-def retrieve_hf_dataset():
-    """
-    Flask endpoint that retrieves metadata for a specific Hugging Face dataset.
-
-    This endpoint retrieves basic metadata about a Hugging Face dataset including its
-    description, author, download count, likes, and available configurations.
-
-    HTTP Method: GET
-    Route: /api/retrieve-dataset
-
-    Query Parameters:
-        dataset_id (str, required): The Hugging Face dataset identifier
-
-    Returns:
-        JSON response containing:
-        - id: The dataset identifier
-        - author: Username of dataset author
-        - description: Dataset description
-        - lastModified: When the dataset was last modified
-        - downloads: Number of downloads
-        - likes: Number of likes/upvotes
-        - configs: List of available configuration names
-
-    Status Codes:
-        200: Success
-        400: Missing dataset_id parameter
-        500: Error retrieving dataset metadata
-    """
-    dataset_id = request.args.get('dataset_id')
-
-    if not dataset_id:
-        return jsonify({'error': 'dataset_id parameter is required'}), 400
-
-    try:
-        response = requests.get(
-            f'https://huggingface.co/api/datasets/{dataset_id}')
-
-        if response.status_code != 200:
-            return jsonify({'error': f'Dataset not found or API returned status code {response.status_code}'}), 404
-
-        dataset_info = response.json()
-
-        configs = get_dataset_config_names(dataset_id)
-
-        result = {
-            'id': dataset_info.get('id'),
-            'author': dataset_info.get('author'),
-            'description': dataset_info.get('description', ''),
-            'lastModified': dataset_info.get('lastModified'),
-            'downloads': dataset_info.get('downloads'),
-            'likes': dataset_info.get('likes'),
-            'configs': configs
-        }
-
-        return jsonify(result)
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -882,136 +506,6 @@ def fetch_config_info(dataset_id, config):
         }
 
 
-@app.route('/api/search/huggingface', methods=['GET'])
-def search_huggingface_endpoint():
-    """
-    Flask endpoint that searches for Hugging Face datasets matching a query string.
-
-    This endpoint allows optional authentication with a Hugging Face token and supports
-    different levels of configuration detail in the response. It can fetch basic dataset
-    information or include detailed configuration metadata using parallel processing
-    for better performance.
-
-    HTTP Method: GET
-    Route: /api/search/huggingface
-
-    Request Headers:
-        X-HF-Token (optional): Hugging Face API token for accessing private datasets
-
-    Query Parameters:
-        query (str, required): Search term to find matching datasets
-        limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-        include_configs (bool, optional): Whether to include configuration information. 
-            Defaults to false.
-        config_detail (str, optional): Level of configuration detail to include. 
-            Options: 'none', 'basic', 'full'. Defaults to 'basic'.
-
-    Returns:
-        JSON response containing either:
-        - A list of formatted Hugging Face datasets matching the search query
-        - When include_configs=true, datasets include configuration information based on
-          the config_detail level
-        - An error message with appropriate HTTP status code (400 for missing query,
-          500 for other errors)
-
-    Note:
-        - For 'full' config_detail, only processes up to 5 configurations per dataset
-        - Uses concurrent processing to improve performance when fetching configuration details
-        - Results are cached for 5 minutes to improve performance
-    """
-    token = request.headers.get('X-HF-Token')
-    query = request.args.get('query')
-    include_configs = request.args.get(
-        'include_configs', 'false').lower() == 'true'
-    config_detail_level = request.args.get(
-        'config_detail', 'basic')
-
-    if not query:
-        return jsonify({'error': 'Query parameter is required'}), 400
-
-    if token:
-        os.environ['HF_TOKEN'] = token
-
-    limit = int(request.args.get('limit', 5))
-    result = search_huggingface_datasets(query, limit)
-
-    if isinstance(result, dict) and 'error' in result:
-        return jsonify(result), 500
-
-    if not include_configs or config_detail_level == 'none':
-        return jsonify(result)
-
-    def process_dataset_configs(dataset):
-        """
-    Processes configuration information for a Hugging Face dataset.
-
-    This helper function retrieves configuration names for a dataset and, based on the
-    specified detail level, fetches additional metadata for each configuration. It handles
-    error cases and limits the number of configurations processed for performance reasons.
-
-    Args:
-        dataset (dict): A dictionary containing dataset information, including the 'id' key
-
-    Returns:
-        dict: The enhanced dataset dictionary with added configuration information:
-            - configs: List of configuration objects with metadata based on detail level
-            - total_configs: Total number of configs if there are more than displayed
-            - additional_configs: Number of configurations not processed when using full detail
-            - configs_error: Error message if configuration processing failed
-
-    Note:
-        - For 'basic' detail level, only configuration names are included
-        - For 'full' detail level, uses parallel processing to fetch detailed information
-          but limits to processing only the first 5 configurations
-        - This function is primarily used internally by the search_huggingface_endpoint
-    """
-        try:
-            dataset_id = dataset.get('id')
-            if not dataset_id:
-                return dataset
-
-            configs = get_dataset_config_names(dataset_id)
-            if not configs:
-                dataset['configs'] = []
-                return dataset
-
-            if config_detail_level == 'basic':
-                dataset['configs'] = [{'name': config} for config in configs]
-                if len(configs) > 5:
-                    dataset['total_configs'] = len(configs)
-                return dataset
-
-            max_configs_to_process = 5
-            configs_to_process = configs[:max_configs_to_process]
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                future_to_config = {
-                    executor.submit(fetch_config_info, dataset_id, config): config
-                    for config in configs_to_process
-                }
-
-                configs_info = []
-                for future in concurrent.futures.as_completed(future_to_config):
-                    configs_info.append(future.result())
-
-            if len(configs) > max_configs_to_process:
-                dataset['additional_configs'] = len(
-                    configs) - max_configs_to_process
-
-            dataset['configs'] = configs_info
-            return dataset
-
-        except Exception as e:
-            dataset['configs_error'] = str(e)
-            return dataset
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(result), 3)) as executor:
-        processed_datasets = list(executor.map(
-            process_dataset_configs, result))
-
-    return jsonify(processed_datasets)
-
-
 @app.route('/api/search', methods=['GET'])
 def search_all_datasets():
     """
@@ -1068,12 +562,6 @@ def search_all_datasets():
             result['kaggle'] = search_kaggle_datasets(query, limit)
         else:
             result['kaggle'] = {'error': 'Kaggle credentials required'}
-
-    if source.lower() in ['all', 'huggingface']:
-        if token:
-            os.environ['HF_TOKEN'] = token
-        result['huggingface'] = search_huggingface_datasets(query, limit)
-
     return jsonify(result)
 
 
@@ -1109,16 +597,6 @@ def get_dataset_suggestions(query, source, limit=5):
         if source.lower() == 'kaggle':
             datasets = list(kaggle_api.dataset_list(search=query))[:limit]
             suggestions = [dataset.title for dataset in datasets]
-
-        elif source.lower() == 'huggingface':
-            response = requests.get(
-                'https://huggingface.co/api/datasets',
-                params={'search': query, 'limit': limit}
-            )
-            if response.status_code == 200:
-                datasets = response.json()
-                suggestions = [dataset.get('id') for dataset in datasets]
-
     except Exception as e:
         return {'error': str(e)}
 
@@ -1168,7 +646,7 @@ def get_suggestions():
 
     result = {}
 
-    if source.lower() in ['all', 'kaggle']:
+    if source.lower() in ['kaggle']:
         username = request.headers.get('X-Kaggle-Username')
         key = request.headers.get('X-Kaggle-Key')
         if username and key:
@@ -1176,13 +654,6 @@ def get_suggestions():
             result['kaggle'] = get_dataset_suggestions(query, 'kaggle', limit)
         else:
             result['kaggle'] = {'error': 'Kaggle credentials required'}
-
-    if source.lower() in ['all', 'huggingface']:
-        token = request.headers.get('X-HF-Token')
-        if token:
-            os.environ['HF_TOKEN'] = token
-        result['huggingface'] = get_dataset_suggestions(
-            query, 'huggingface', limit)
 
     return jsonify(result)
 
