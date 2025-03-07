@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 RUN mkdir -p /root/.kaggle && chmod 700 /root/.kaggle
+RUN mkdir -p /app/downloads && chmod 777 /app/downloads
 
 EXPOSE 5000
 

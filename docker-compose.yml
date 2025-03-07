@@ -1,23 +1,19 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "5000:5000"
     env_file:
       - .env
+    volumes:
+      - ./downloads:/app/downloads
     environment:
       - PYTHONUNBUFFERED=1
-      - FLASK_DEBUG=1
-    volumes:
-      - ./downloads:/app/downloads  
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     restart: unless-stopped
     deploy:
       resources:
         limits:
           cpus: '1'
-          memory: 1G
+          memory: 512M
