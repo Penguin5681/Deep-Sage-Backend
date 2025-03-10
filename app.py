@@ -35,36 +35,6 @@ def authenticate_kaggle(kaggle_username, kaggle_key):
 
 
 def get_kaggle_datasets(limit=5, sort_by='hottest'):
-    """
-    Retrieves a list of datasets from Kaggle and formats them into a standardized structure.
-
-    This function fetches datasets from the Kaggle API based on the specified sorting criteria
-    and limits the number of results. It validates the sorting option against allowed values
-    and handles any exceptions that may occur during the API call.
-
-    Args:
-        limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-        sort_by (str, optional): Criteria to sort datasets by. Defaults to 'hottest'.
-            Valid options are: 'hottest', 'votes', 'updated', 'active', 'published'.
-
-    Returns:
-        list or dict: If successful, returns a list of dictionaries containing formatted dataset
-            information with the following keys:
-            - id: Dataset reference identifier
-            - title: Dataset title
-            - owner: Username of dataset owner
-            - url: Full URL to the dataset on Kaggle
-            - size: Size of the dataset
-            - lastUpdated: When the dataset was last updated
-            - downloadCount: Number of downloads
-            - voteCount: Number of votes/upvotes
-            - description: Dataset description
-
-            If an error occurs or sort_by is invalid, returns a dictionary with an 'error' key.
-
-    Note:
-        Requires prior authentication with the Kaggle API using authenticate_kaggle().
-    """
     try:
         valid_sorts = ['hottest', 'votes', 'updated', 'active', 'published']
         if sort_by not in valid_sorts:
@@ -91,36 +61,8 @@ def get_kaggle_datasets(limit=5, sort_by='hottest'):
 
 
 @app.route('/api/datasets/kaggle', methods=['GET'])
-@cache.memoize(300)
 def get_kaggle_datasets_endpoint():
-    """
-    Flask endpoint that retrieves Kaggle datasets based on specified criteria.
 
-    This endpoint requires Kaggle authentication credentials in the request headers.
-    It extracts username and API key from headers, authenticates with the Kaggle API,
-    and then calls the get_kaggle_datasets function with parameters from the request.
-
-    HTTP Method: GET
-    Route: /api/datasets/kaggle
-
-    Request Headers:
-        X-Kaggle-Username: Kaggle username for authentication
-        X-Kaggle-Key: Kaggle API key for authentication
-
-    Query Parameters:
-        limit (int, optional): Maximum number of datasets to return. Defaults to 5.
-        sort_by (str, optional): Criteria to sort datasets by. Defaults to 'hottest'.
-            Valid options are: 'hottest', 'votes', 'updated', 'active', 'published'.
-
-    Returns:
-        JSON response containing either:
-        - A list of formatted Kaggle datasets
-        - An error message with appropriate HTTP status code (401 for authentication errors,
-          500 for other errors)
-
-    Note:
-        Authentication is mandatory for this endpoint.
-    """
     username = request.headers.get('X-Kaggle-Username')
     key = request.headers.get('X-Kaggle-Key')
 
@@ -135,58 +77,6 @@ def get_kaggle_datasets_endpoint():
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/datasets', methods=['GET'])
-def get_datasets():
-    """
-    Flask endpoint that retrieves datasets from multiple sources based on specified parameters.
-
-    This unified endpoint allows fetching datasets from both Kaggle and Hugging Face simultaneously
-    or selectively, based on the 'source' parameter. It handles authentication for both platforms
-    and applies source-specific sorting criteria.
-
-    HTTP Method: GET
-    Route: /api/datasets
-
-    Request Headers:
-        X-Kaggle-Username (optional): Kaggle username for authentication
-        X-Kaggle-Key (optional): Kaggle API key for authentication
-        X-HF-Token (optional): Hugging Face API token for authentication
-
-    Query Parameters:
-        source (str, optional): Source to fetch datasets from. Defaults to 'all'.
-            Valid options are: 'all', 'kaggle', 'huggingface'
-        limit (int, optional): Maximum number of datasets to return per source. Defaults to 5.
-        kaggle_sort (str, optional): Criteria to sort Kaggle datasets by. Defaults to 'hottest'.
-        hf_sort (str, optional): Criteria to sort Hugging Face datasets by. Defaults to 'downloads'.
-
-    Returns:
-        JSON response containing:
-        - A dictionary with keys for each requested source ('kaggle', 'huggingface')
-        - Each source key contains either a list of datasets or an error message
-        - For Kaggle, returns an error if credentials are not provided
-
-    Note:
-        Authentication is required for Kaggle datasets, optional for Hugging Face.
-    """
-    source = request.args.get('source', 'all')
-    limit = int(request.args.get('limit', 5))
-
-    username = request.headers.get('X-Kaggle-Username')
-    key = request.headers.get('X-Kaggle-Key')
-
-    result = {}
-
-    if source.lower() in ['all', 'kaggle']:
-        if username and key:
-            authenticate_kaggle(username, key)
-            sort_by = request.args.get('kaggle_sort', 'hottest')
-            result['kaggle'] = get_kaggle_datasets(limit, sort_by)
-        else:
-            result['kaggle'] = {'error': 'Kaggle credentials required'}
-
-    return jsonify(result)
 
 
 @app.route('/api/datasets/download', methods=['POST'])
@@ -551,57 +441,291 @@ def retrieve_kaggle_dataset():
         }), 500
 
 
-@cache.memoize(timeout=1800)
-def fetch_config_info(dataset_id, config):
+@cache.memoize(timeout=600)
+def get_finance_datasets(limit=10, sort_by='hottest'):
     """
-    Retrieves detailed configuration information for a specific Hugging Face dataset configuration.
+    Retrieves finance-related datasets from Kaggle.
 
-    This function loads a dataset builder for the specified dataset ID and configuration,
-    then extracts metadata including total size and number of examples. Results are cached
-    for 30 minutes (1800 seconds) to improve performance and reduce API load.
+    Searches for datasets matching finance keywords and categories, returning
+    the most relevant results based on the specified sorting method.
 
     Args:
-        dataset_id (str): The Hugging Face dataset identifier (e.g., 'squad', 'glue')
-        config (str): The specific configuration name to fetch information for
+        limit (int, optional): Maximum number of datasets to return. Defaults to 10.
+        sort_by (str, optional): How to sort results. Defaults to 'hottest'.
+            Options: 'hottest', 'votes', 'updated', 'active', 'published'
 
     Returns:
-        dict: A dictionary containing configuration information with the following keys:
-            - name: Configuration name
-            - total_size_bytes: Total size of the dataset configuration in bytes
-            - total_examples: Total number of examples across all splits
-
-            If an error occurs, the dictionary will contain:
-            - name: Configuration name
-            - error: Error message describing what went wrong
-
-    Note:
-        - Results are cached for 1800 seconds (30 minutes) to improve performance
-        - This function is primarily used internally by search endpoints that need
-          detailed configuration information
+        list: Formatted finance-related datasets from Kaggle
     """
     try:
-        from datasets import load_dataset_builder
-        builder = load_dataset_builder(dataset_id, config)
-        info = builder.info
 
-        total_size = 0
-        num_examples = 0
+        search_terms = [
+            "finance", "financial", "stock", "stocks", "trading",
+            "investment", "banking", "economy", "economic", "cryptocurrency"
+        ]
 
-        if hasattr(info, 'splits') and info.splits:
-            for split_name, split_info in info.splits.items():
-                total_size += getattr(split_info, 'num_bytes', 0)
-                num_examples += getattr(split_info, 'num_examples', 0)
+        all_results = []
 
-        return {
-            'name': config,
-            'total_size_bytes': total_size,
-            'total_examples': num_examples
-        }
+        for term in search_terms:
+            datasets = list(kaggle_api.dataset_list(
+                search=term, sort_by=sort_by))
+            for dataset in datasets:
+
+                if not any(d.get('id') == dataset.ref for d in all_results):
+                    all_results.append({
+                        'id': dataset.ref,
+                        'title': dataset.title,
+                        'owner': dataset.ownerName,
+                        'url': f'https://www.kaggle.com/datasets/{dataset.ref}',
+                        'size': dataset.size,
+                        'lastUpdated': dataset.lastUpdated,
+                        'downloadCount': dataset.downloadCount,
+                        'voteCount': dataset.voteCount,
+                        'description': dataset.description,
+                        'searchTerm': term
+                    })
+
+                if len(all_results) >= limit:
+                    break
+
+            if len(all_results) >= limit:
+                break
+
+        return all_results[:limit]
+
     except Exception as e:
-        return {
-            'name': config,
-            'error': f"Couldn't fetch info: {str(e)}"
-        }
+        return {'error': str(e)}
+
+
+@app.route('/api/datasets/finance', methods=['GET'])
+def get_finance_datasets_endpoint():
+    """
+    Flask endpoint that returns finance-related datasets from Kaggle.
+
+    Requires Kaggle authentication via request headers and returns datasets
+    related to finance, investments, banking, stocks, etc.
+
+    HTTP Method: GET
+    Route: /api/datasets/finance
+
+    Request Headers:
+        X-Kaggle-Username: Kaggle username for authentication
+        X-Kaggle-Key: Kaggle API key for authentication
+
+    Query Parameters:
+        limit (int, optional): Maximum number of datasets to return. Defaults to 10.
+        sort_by (str, optional): How to sort results. Defaults to 'hottest'.
+
+    Returns:
+        JSON response containing a list of finance-related datasets
+    """
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+
+    if not username or not key:
+        return jsonify({'error': 'Kaggle username and API key are required in headers'}), 401
+
+    try:
+        authenticate_kaggle(username, key)
+        limit = int(request.args.get('limit', 10))
+        sort_by = request.args.get('sort_by', 'hottest')
+
+        result = get_finance_datasets(limit, sort_by)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cache.memoize(timeout=600)
+def get_technology_datasets(limit=10, sort_by='hottest'):
+    """
+    Retrieves technology-related datasets from Kaggle.
+
+    Searches for datasets matching technology keywords and categories, returning
+    the most relevant results based on the specified sorting method.
+
+    Args:
+        limit (int, optional): Maximum number of datasets to return. Defaults to 10.
+        sort_by (str, optional): How to sort results. Defaults to 'hottest'.
+            Options: 'hottest', 'votes', 'updated', 'active', 'published'
+
+    Returns:
+        list: Formatted technology-related datasets from Kaggle
+    """
+    try:
+
+        search_terms = [
+            "technology", "tech", "software", "hardware", "AI",
+            "artificial intelligence", "machine learning", "data science",
+            "programming", "computer science", "robotics", "iot"
+        ]
+
+        all_results = []
+
+        for term in search_terms:
+            datasets = list(kaggle_api.dataset_list(
+                search=term, sort_by=sort_by))
+            for dataset in datasets:
+
+                if not any(d.get('id') == dataset.ref for d in all_results):
+                    all_results.append({
+                        'id': dataset.ref,
+                        'title': dataset.title,
+                        'owner': dataset.ownerName,
+                        'url': f'https://www.kaggle.com/datasets/{dataset.ref}',
+                        'size': dataset.size,
+                        'lastUpdated': dataset.lastUpdated,
+                        'downloadCount': dataset.downloadCount,
+                        'voteCount': dataset.voteCount,
+                        'description': dataset.description,
+                        'searchTerm': term
+                    })
+
+                if len(all_results) >= limit:
+                    break
+
+            if len(all_results) >= limit:
+                break
+
+        return all_results[:limit]
+
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@app.route('/api/datasets/technology', methods=['GET'])
+def get_technology_datasets_endpoint():
+    """
+    Flask endpoint that returns technology-related datasets from Kaggle.
+
+    Requires Kaggle authentication via request headers and returns datasets
+    related to technology, AI, machine learning, software, hardware, etc.
+
+    HTTP Method: GET
+    Route: /api/datasets/technology
+
+    Request Headers:
+        X-Kaggle-Username: Kaggle username for authentication
+        X-Kaggle-Key: Kaggle API key for authentication
+
+    Query Parameters:
+        limit (int, optional): Maximum number of datasets to return. Defaults to 10.
+        sort_by (str, optional): How to sort results. Defaults to 'hottest'.
+
+    Returns:
+        JSON response containing a list of technology-related datasets
+    """
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+
+    if not username or not key:
+        return jsonify({'error': 'Kaggle username and API key are required in headers'}), 401
+
+    try:
+        authenticate_kaggle(username, key)
+        limit = int(request.args.get('limit', 10))
+        sort_by = request.args.get('sort_by', 'hottest')
+
+        result = get_technology_datasets(limit, sort_by)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cache.memoize(timeout=600)
+def get_healthcare_datasets(limit=10, sort_by='hottest'):
+    """
+    Retrieves healthcare-related datasets from Kaggle.
+
+    Searches for datasets matching healthcare keywords and categories, returning
+    the most relevant results based on the specified sorting method.
+
+    Args:
+        limit (int, optional): Maximum number of datasets to return. Defaults to 10.
+        sort_by (str, optional): How to sort results. Defaults to 'hottest'.
+            Options: 'hottest', 'votes', 'updated', 'active', 'published'
+
+    Returns:
+        list: Formatted healthcare-related datasets from Kaggle
+    """
+    try:
+
+        search_terms = [
+            "healthcare", "health", "medical", "medicine", "clinical",
+            "patient", "hospital", "disease", "diagnosis", "treatment",
+            "pharmaceutical", "biomedical", "drug", "epidemiology", "covid", "diabetes", "cancer"
+        ]
+
+        all_results = []
+
+        for term in search_terms:
+            datasets = list(kaggle_api.dataset_list(
+                search=term, sort_by=sort_by))
+            for dataset in datasets:
+
+                if not any(d.get('id') == dataset.ref for d in all_results):
+                    all_results.append({
+                        'id': dataset.ref,
+                        'title': dataset.title,
+                        'owner': dataset.ownerName,
+                        'url': f'https://www.kaggle.com/datasets/{dataset.ref}',
+                        'size': dataset.size,
+                        'lastUpdated': dataset.lastUpdated,
+                        'downloadCount': dataset.downloadCount,
+                        'voteCount': dataset.voteCount,
+                        'description': dataset.description,
+                        'searchTerm': term
+                    })
+
+                if len(all_results) >= limit:
+                    break
+
+            if len(all_results) >= limit:
+                break
+
+        return all_results[:limit]
+
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@app.route('/api/datasets/healthcare', methods=['GET'])
+def get_healthcare_datasets_endpoint():
+    """
+    Flask endpoint that returns healthcare-related datasets from Kaggle.
+
+    Requires Kaggle authentication via request headers and returns datasets
+    related to healthcare, medicine, clinical research, diseases, treatments, etc.
+
+    HTTP Method: GET
+    Route: /api/datasets/healthcare
+
+    Request Headers:
+        X-Kaggle-Username: Kaggle username for authentication
+        X-Kaggle-Key: Kaggle API key for authentication
+
+    Query Parameters:
+        limit (int, optional): Maximum number of datasets to return. Defaults to 10.
+        sort_by (str, optional): How to sort results. Defaults to 'hottest'.
+
+    Returns:
+        JSON response containing a list of healthcare-related datasets
+    """
+    username = request.headers.get('X-Kaggle-Username')
+    key = request.headers.get('X-Kaggle-Key')
+
+    if not username or not key:
+        return jsonify({'error': 'Kaggle username and API key are required in headers'}), 401
+
+    try:
+        authenticate_kaggle(username, key)
+        limit = int(request.args.get('limit', 10))
+        sort_by = request.args.get('sort_by', 'hottest')
+
+        result = get_healthcare_datasets(limit, sort_by)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/search', methods=['GET'])
@@ -784,4 +908,4 @@ def health_check():
 
 
 if __name__ == '__main__':
-    app.run(debug=False, port=5000, host='0.0.0.0')
+    app.run(debug=True, port=5000, host='0.0.0.0')
