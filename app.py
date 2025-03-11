@@ -81,9 +81,20 @@ def get_kaggle_datasets_endpoint():
 
 @app.route('/api/datasets/download', methods=['POST'])
 def download_dataset():
-    """Download dataset to user-specified path from multiple sources."""
+    """
+    Download dataset to user-specified path from multiple sources with real-time progress updates.
+
+    Returns a stream of Server-Sent Events (SSE) with download progress that can be 
+    consumed by a Flutter frontend to show progress indicators.
+    """
     import platform
+    import time
+    import threading
+    import json
+    import queue
     from pathlib import Path
+    from flask import Response
+    import copy
 
     data = request.json
     source = data.get('source')
@@ -104,145 +115,329 @@ def download_dataset():
     if not source or not dataset_id:
         return jsonify({'error': 'Source and dataset_id are required'}), 400
 
+    kaggle_username = request.headers.get('X-Kaggle-Username')
+    kaggle_key = request.headers.get('X-Kaggle-Key')
+
+    if source.lower() == 'kaggle' and (not kaggle_username or not kaggle_key):
+        return jsonify({'error': 'Kaggle credentials required'}), 401
+
+    if source.lower() == 'kaggle':
+        try:
+
+            authenticate_kaggle(kaggle_username, kaggle_key)
+        except Exception as e:
+            return jsonify({'error': f'Kaggle authentication failed: {str(e)}'}), 401
+
     base_downloads_dir = '/app/downloads'
     is_docker = os.path.exists('/.dockerenv')
 
     if is_docker and not os.path.exists(base_downloads_dir):
         try:
             os.makedirs(base_downloads_dir, exist_ok=True)
-            print(
-                f"Created base downloads directory in Docker: {base_downloads_dir}")
             os.chmod(base_downloads_dir, 0o777)
         except Exception as e:
-            print(f"Error creating base downloads directory: {str(e)}")
             return jsonify({'error': f'Unable to create downloads directory: {str(e)}'}), 500
-
-    print(f"Received download path: {download_path}")
 
     safe_name = dataset_id.replace('/', '_').replace('\\', '_')
 
-    try:
+    status_queue = queue.Queue()
 
-        if not os.path.exists(download_path):
-            os.makedirs(download_path, exist_ok=True)
-            print(f"Created directory: {download_path}")
+    def event_stream():
+        """Generate SSE events with download progress updates."""
+        download_status = {
+            'state': 'initializing',
+            'progress': 0,
+            'message': 'Preparing download...',
+            'dataset_id': dataset_id,
+            'download_path': None,
+            'files': [],
+            'error': None
+        }
 
-        dataset_dir = os.path.join(download_path, safe_name)
-        os.makedirs(dataset_dir, exist_ok=True)
-        print(f"Created dataset directory: {dataset_dir}")
-
-        download_path = dataset_dir
-        original_path = download_path
-
-        if is_docker:
-
-            container_path = f"{base_downloads_dir}/{safe_name}"
-            container_path = container_path.replace('\\', '/')
-            print(f"Using container path for Docker: {container_path}")
-            download_path = container_path
+        yield f"data: {json.dumps(download_status)}\n\n"
 
         try:
-            os.chmod(download_path, 0o777)
-        except Exception as e:
-            print(
-                f"Warning: Could not set permissions on {download_path}: {str(e)}")
 
-        if not os.access(download_path, os.W_OK):
-            return jsonify({'error': f'Directory {download_path} is not writable'}), 500
+            if not os.path.exists(download_path):
+                os.makedirs(download_path, exist_ok=True)
+                download_status['message'] = f"Created directory: {download_path}"
+                yield f"data: {json.dumps(download_status)}\n\n"
 
-        if source.lower() == 'kaggle':
-            username = request.headers.get('X-Kaggle-Username')
-            key = request.headers.get('X-Kaggle-Key')
+            dataset_dir = os.path.join(download_path, safe_name)
+            os.makedirs(dataset_dir, exist_ok=True)
 
-            if not username or not key:
-                return jsonify({'error': 'Kaggle credentials required'}), 401
+            final_download_path = dataset_dir
+            original_path = dataset_dir
 
-            authenticate_kaggle(username, key)
-            print(
-                f"Downloading Kaggle dataset {dataset_id} to {download_path}")
+            if is_docker:
+                container_path = f"{base_downloads_dir}/{safe_name}"
+                container_path = container_path.replace('\\', '/')
+                final_download_path = container_path
 
             try:
-                kaggle_api.dataset_download_files(
-                    dataset_id,
-                    path=download_path,
-                    unzip=unzip,
-                    quiet=False
+                os.chmod(final_download_path, 0o777)
+            except Exception as e:
+                download_status[
+                    'message'] = f"Warning: Could not set permissions on {final_download_path}"
+                yield f"data: {json.dumps(download_status)}\n\n"
+
+            if not os.access(final_download_path, os.W_OK):
+                download_status['state'] = 'error'
+                download_status['error'] = f'Directory {final_download_path} is not writable'
+                yield f"data: {json.dumps(download_status)}\n\n"
+                return
+
+            if source.lower() == 'kaggle':
+
+                download_status['state'] = 'downloading'
+                download_status['message'] = f"Starting download of {dataset_id}"
+                download_status['download_path'] = final_download_path
+                yield f"data: {json.dumps(download_status)}\n\n"
+
+                download_completed = threading.Event()
+
+                def monitor_download():
+                    """Monitor download directory for changes to estimate progress."""
+                    try:
+                        initial_size = 0
+                        if os.path.exists(final_download_path):
+                            initial_size = sum(f.stat().st_size for f in Path(
+                                final_download_path).glob('**/*') if f.is_file())
+
+                        check_interval = 0.5
+                        last_size = initial_size
+                        last_update_time = time.time()
+                        last_progress_reported = -1
+                        start_time = time.time()
+
+                        speeds = []
+                        max_speed_samples = 10
+                        estimated_total_size = None
+                        stalled_count = 0
+                        max_stalled_allowed = 40
+
+                        while not download_completed.is_set():
+                            time.sleep(check_interval)
+
+                            try:
+                                current_size = 0
+                                if os.path.exists(final_download_path):
+                                    current_size = sum(f.stat().st_size for f in Path(
+                                        final_download_path).glob('**/*') if f.is_file())
+
+                                current_time = time.time()
+                                time_diff = current_time - last_update_time
+
+                                if time_diff > 0:
+                                    current_speed = (
+                                        current_size - last_size) / time_diff
+                                    if current_speed > 0:
+                                        speeds.append(current_speed)
+                                        if len(speeds) > max_speed_samples:
+                                            speeds.pop(0)
+
+                                        avg_speed = sum(
+                                            speeds) / len(speeds) if speeds else 0
+
+                                        if current_size == last_size:
+                                            stalled_count += 1
+                                        else:
+                                            stalled_count = 0
+
+                                        if not estimated_total_size or stalled_count > max_stalled_allowed:
+                                            time_elapsed = current_time - start_time
+                                            if time_elapsed > 5:
+
+                                                new_estimate = current_size + \
+                                                    (avg_speed * 30)
+                                                if estimated_total_size is None:
+                                                    estimated_total_size = new_estimate
+                                                else:
+                                                    estimated_total_size = max(
+                                                        estimated_total_size, new_estimate)
+                                                stalled_count = 0
+
+                                        if estimated_total_size and estimated_total_size > initial_size:
+                                            denominator = estimated_total_size - initial_size
+                                            progress = int(
+                                                (current_size - initial_size) / denominator * 100)
+                                            progress = min(progress, 99)
+                                        else:
+
+                                            progress = 0
+
+                                        if progress != last_progress_reported:
+                                            status = {
+                                                'state': 'downloading',
+                                                'progress': progress,
+                                                'message': f"Downloading... {progress}% ({format_size(current_size)})",
+                                                'bytes_downloaded': current_size,
+                                                'speed': f"{format_size(avg_speed)}/s" if avg_speed > 0 else "0 B/s",
+                                                'estimated_size': estimated_total_size,
+                                                'time_elapsed': int(current_time - start_time)
+                                            }
+                                            status_queue.put(status)
+                                            last_progress_reported = progress
+
+                                last_size = current_size
+                                last_update_time = current_time
+                            except Exception as e:
+                                pass
+
+                    except Exception as e:
+                        status_queue.put({
+                            'state': 'error',
+                            'error': f"Monitor error: {str(e)}",
+                            'message': f"Monitor error: {str(e)}"
+                        })
+
+                monitor_thread = threading.Thread(target=monitor_download)
+                monitor_thread.daemon = True
+                monitor_thread.start()
+
+                download_thread_error = [None]
+
+                def perform_download(username, key, dataset):
+                    """Perform download in separate thread with its own API authentication."""
+                    try:
+
+                        import kaggle
+                        from kaggle.api.kaggle_api_extended import KaggleApi
+
+                        os.environ['KAGGLE_USERNAME'] = username
+                        os.environ['KAGGLE_KEY'] = key
+
+                        thread_api = KaggleApi()
+                        thread_api.authenticate()
+
+                        thread_api.dataset_download_files(
+                            dataset,
+                            path=final_download_path,
+                            unzip=unzip,
+                            quiet=False
+                        )
+
+                        files = []
+                        for root, _, filenames in os.walk(final_download_path):
+                            for filename in filenames:
+                                full_path = os.path.join(
+                                    root, filename).replace('\\', '/')
+                                host_path = full_path
+                                if is_docker:
+                                    host_path = full_path.replace(
+                                        '/app/downloads', './downloads')
+
+                                file_size = os.path.getsize(full_path)
+                                files.append({
+                                    'name': filename,
+                                    'path': full_path,
+                                    'size': file_size,
+                                    'size_formatted': format_size(file_size),
+                                    'container_path': full_path if is_docker else None,
+                                    'host_path': host_path
+                                })
+
+                        if not files:
+                            import glob
+                            all_files = glob.glob(
+                                f"{final_download_path}/**/*.*", recursive=True)
+
+                            for file_path in all_files:
+                                file_path = file_path.replace('\\', '/')
+                                filename = os.path.basename(file_path)
+                                host_path = file_path
+                                if is_docker:
+                                    host_path = file_path.replace(
+                                        '/app/downloads', './downloads')
+
+                                file_size = os.path.getsize(file_path)
+                                files.append({
+                                    'name': filename,
+                                    'path': file_path,
+                                    'size': file_size,
+                                    'size_formatted': format_size(file_size),
+                                    'container_path': file_path if is_docker else None,
+                                    'host_path': host_path
+                                })
+
+                        host_dir_path = final_download_path
+                        if is_docker:
+                            host_dir_path = final_download_path.replace(
+                                '/app/downloads', './downloads')
+
+                        status_queue.put({
+                            'state': 'completed',
+                            'progress': 100,
+                            'message': 'Dataset downloaded successfully',
+                            'files': files,
+                            'file_count': len(files),
+                            'container_path': final_download_path if is_docker else None,
+                            'host_path': original_path,
+                            'host_volume_path': host_dir_path if is_docker else None,
+                            'unzipped': unzip,
+                            'safe_name': safe_name,
+                            'docker_volume_path': host_dir_path if is_docker else None
+                        })
+                    except Exception as e:
+                        download_thread_error[0] = str(e)
+                        status_queue.put({
+                            'state': 'error',
+                            'error': str(e),
+                            'message': f'Download failed: {str(e)}'
+                        })
+                    finally:
+                        download_completed.set()
+
+                download_thread = threading.Thread(
+                    target=perform_download,
+                    args=(kaggle_username, kaggle_key, dataset_id)
                 )
+                download_thread.daemon = True
+                download_thread.start()
 
-                import time
-                time.sleep(1)
+                while not download_completed.is_set() or not status_queue.empty():
+                    try:
 
-                files = []
-                for root, _, filenames in os.walk(download_path):
-                    for filename in filenames:
-                        full_path = os.path.join(
-                            root, filename).replace('\\', '/')
-                        host_path = full_path
-                        if is_docker:
-                            host_path = full_path.replace(
-                                '/app/downloads', './downloads')
+                        status_update = status_queue.get(timeout=0.5)
 
-                        files.append({
-                            'name': filename,
-                            'path': full_path,
-                            'size': os.path.getsize(full_path),
-                            'container_path': full_path if is_docker else None,
-                            'host_path': host_path
-                        })
+                        download_status.update(status_update)
 
-                print(
-                    f"Files in download directory: {[f['name'] for f in files]}")
+                        yield f"data: {json.dumps(download_status)}\n\n"
 
-                if not files:
-                    print(
-                        "WARNING: No files found after download. Checking for ZIP files.")
-                    import glob
-                    all_files = glob.glob(
-                        f"{download_path}/**/*.*", recursive=True)
-                    print(f"Files found with glob: {all_files}")
+                        status_queue.task_done()
+                    except queue.Empty:
 
-                    for file_path in all_files:
-                        file_path = file_path.replace('\\', '/')
-                        filename = os.path.basename(file_path)
-                        host_path = file_path
-                        if is_docker:
-                            host_path = file_path.replace(
-                                '/app/downloads', './downloads')
+                        pass
 
-                        files.append({
-                            'name': filename,
-                            'path': file_path,
-                            'size': os.path.getsize(file_path),
-                            'container_path': file_path if is_docker else None,
-                            'host_path': host_path
-                        })
+                if download_thread_error[0]:
+                    download_status['state'] = 'error'
+                    download_status['error'] = download_thread_error[0]
+                    download_status['message'] = f'Download failed: {download_thread_error[0]}'
+                    yield f"data: {json.dumps(download_status)}\n\n"
+                elif download_status['state'] != 'completed':
+                    download_status['state'] = 'completed'
+                    download_status['progress'] = 100
+                    download_status['message'] = 'Dataset downloaded successfully but no detailed results'
+                    yield f"data: {json.dumps(download_status)}\n\n"
 
-                host_dir_path = download_path
-                if is_docker:
-                    host_dir_path = download_path.replace(
-                        '/app/downloads', './downloads')
+        except Exception as err:
+            download_status['state'] = 'error'
+            download_status['error'] = str(err)
+            download_status['message'] = f'Download error: {str(err)}'
+            yield f"data: {json.dumps(download_status)}\n\n"
 
-                return jsonify({
-                    'success': True,
-                    'message': f'Dataset downloaded successfully',
-                    'container_path': download_path if is_docker else None,
-                    'host_path': original_path,
-                    'host_volume_path': host_dir_path if is_docker else None,
-                    'files': files,
-                    'file_count': len(files),
-                    'unzipped': unzip,
-                    'dataset_id': dataset_id,
-                    'safe_name': safe_name,
-                    'docker_volume_path': host_dir_path if is_docker else None
-                })
+    def format_size(size_bytes):
+        """Format bytes into a human-readable string."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes/1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes/(1024*1024):.1f} MB"
+        else:
+            return f"{size_bytes/(1024*1024*1024):.1f} GB"
 
-            except Exception as kaggle_error:
-                print(f"Kaggle error: {kaggle_error}")
-                return jsonify({'error': str(kaggle_error)}), 500
-
-    except Exception as err:
-        print(f"Download error: {err}")
-        return jsonify({'error': str(err)}), 500
+    return Response(event_stream(), mimetype="text/event-stream")
 
 
 @cache.memoize(timeout=300)
