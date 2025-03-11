@@ -82,21 +82,36 @@ def get_kaggle_datasets_endpoint():
 @app.route('/api/datasets/download', methods=['POST'])
 def download_dataset():
     """Download dataset to user-specified path from multiple sources."""
+    import platform
+    from pathlib import Path
+
     data = request.json
     source = data.get('source')
     dataset_id = data.get('dataset_id')
-    download_path = data.get('path', './downloads')
     config = data.get('config')
     unzip = data.get('unzip', False)
+
+    if platform.system() == 'Windows':
+        default_download_path = os.path.join(
+            os.environ['USERPROFILE'], 'Downloads')
+    elif platform.system() == 'Darwin':
+        default_download_path = os.path.join(os.environ['HOME'], 'Downloads')
+    else:
+        default_download_path = '/app/downloads'
+
+    download_path = data.get('path', default_download_path)
 
     if not source or not dataset_id:
         return jsonify({'error': 'Source and dataset_id are required'}), 400
 
     base_downloads_dir = '/app/downloads'
-    if not os.path.exists(base_downloads_dir):
+    is_docker = os.path.exists('/.dockerenv')
+
+    if is_docker and not os.path.exists(base_downloads_dir):
         try:
             os.makedirs(base_downloads_dir, exist_ok=True)
-            print(f"Created base downloads directory: {base_downloads_dir}")
+            print(
+                f"Created base downloads directory in Docker: {base_downloads_dir}")
             os.chmod(base_downloads_dir, 0o777)
         except Exception as e:
             print(f"Error creating base downloads directory: {str(e)}")
@@ -106,32 +121,31 @@ def download_dataset():
 
     safe_name = dataset_id.replace('/', '_').replace('\\', '_')
 
-    if '\\' in download_path or ':' in download_path:
-
-        container_path = f"{base_downloads_dir}/{safe_name}"
-
-        container_path = container_path.replace('\\', '/')
-        print(f"Using container path for Docker: {container_path}")
-
-        original_path = download_path
-        download_path = container_path
-    else:
-
-        if not os.path.isabs(download_path):
-
-            if download_path.startswith('./') or download_path.startswith('.\\'):
-                download_path = download_path[2:]
-            download_path = os.path.join(base_downloads_dir, download_path)
-
-        download_path = download_path.replace('\\', '/')
-        original_path = download_path
-
     try:
 
-        os.makedirs(download_path, exist_ok=True)
-        print(f"Created directory: {download_path}")
+        if not os.path.exists(download_path):
+            os.makedirs(download_path, exist_ok=True)
+            print(f"Created directory: {download_path}")
 
-        os.chmod(download_path, 0o777)
+        dataset_dir = os.path.join(download_path, safe_name)
+        os.makedirs(dataset_dir, exist_ok=True)
+        print(f"Created dataset directory: {dataset_dir}")
+
+        download_path = dataset_dir
+        original_path = download_path
+
+        if is_docker:
+
+            container_path = f"{base_downloads_dir}/{safe_name}"
+            container_path = container_path.replace('\\', '/')
+            print(f"Using container path for Docker: {container_path}")
+            download_path = container_path
+
+        try:
+            os.chmod(download_path, 0o777)
+        except Exception as e:
+            print(
+                f"Warning: Could not set permissions on {download_path}: {str(e)}")
 
         if not os.access(download_path, os.W_OK):
             return jsonify({'error': f'Directory {download_path} is not writable'}), 500
@@ -148,7 +162,6 @@ def download_dataset():
                 f"Downloading Kaggle dataset {dataset_id} to {download_path}")
 
             try:
-
                 kaggle_api.dataset_download_files(
                     dataset_id,
                     path=download_path,
@@ -162,16 +175,18 @@ def download_dataset():
                 files = []
                 for root, _, filenames in os.walk(download_path):
                     for filename in filenames:
-
                         full_path = os.path.join(
                             root, filename).replace('\\', '/')
-                        host_path = full_path.replace(
-                            '/app/downloads', './downloads')
+                        host_path = full_path
+                        if is_docker:
+                            host_path = full_path.replace(
+                                '/app/downloads', './downloads')
+
                         files.append({
                             'name': filename,
                             'path': full_path,
                             'size': os.path.getsize(full_path),
-                            'container_path': full_path,
+                            'container_path': full_path if is_docker else None,
                             'host_path': host_path
                         })
 
@@ -181,47 +196,53 @@ def download_dataset():
                 if not files:
                     print(
                         "WARNING: No files found after download. Checking for ZIP files.")
-
                     import glob
                     all_files = glob.glob(
                         f"{download_path}/**/*.*", recursive=True)
                     print(f"Files found with glob: {all_files}")
 
                     for file_path in all_files:
-
                         file_path = file_path.replace('\\', '/')
                         filename = os.path.basename(file_path)
-                        host_path = file_path.replace(
-                            '/app/downloads', './downloads')
+                        host_path = file_path
+                        if is_docker:
+                            host_path = file_path.replace(
+                                '/app/downloads', './downloads')
+
                         files.append({
                             'name': filename,
                             'path': file_path,
                             'size': os.path.getsize(file_path),
-                            'container_path': file_path,
+                            'container_path': file_path if is_docker else None,
                             'host_path': host_path
                         })
 
-                host_dir_path = download_path.replace(
-                    '/app/downloads', './downloads')
+                host_dir_path = download_path
+                if is_docker:
+                    host_dir_path = download_path.replace(
+                        '/app/downloads', './downloads')
 
                 return jsonify({
                     'success': True,
                     'message': f'Dataset downloaded successfully',
-                    'container_path': download_path,
+                    'container_path': download_path if is_docker else None,
                     'host_path': original_path,
-                    'host_volume_path': host_dir_path,
+                    'host_volume_path': host_dir_path if is_docker else None,
                     'files': files,
                     'file_count': len(files),
                     'unzipped': unzip,
                     'dataset_id': dataset_id,
                     'safe_name': safe_name,
-                    'docker_volume_path': host_dir_path
+                    'docker_volume_path': host_dir_path if is_docker else None
                 })
 
             except Exception as kaggle_error:
-                print(kaggle_error)
+                print(f"Kaggle error: {kaggle_error}")
+                return jsonify({'error': str(kaggle_error)}), 500
+
     except Exception as err:
-        print(err)
+        print(f"Download error: {err}")
+        return jsonify({'error': str(err)}), 500
 
 
 @cache.memoize(timeout=300)
