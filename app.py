@@ -1,9 +1,11 @@
+import base64
 from kaggle.api.kaggle_api_extended import KaggleApi
 import datetime
 from flask import Flask, jsonify, request
 import os
 from flask_caching import Cache
 from dotenv import load_dotenv
+import threading
 
 load_dotenv()
 
@@ -20,6 +22,8 @@ os.environ['KAGGLE_USERNAME'] = os.getenv('KAGGLE_USERNAME')
 os.environ['KAGGLE_KEY'] = os.getenv('KAGGLE_KEY')
 
 kaggle_api = KaggleApi()
+
+active_downloads = {}
 
 
 def authenticate_kaggle(kaggle_username, kaggle_key):
@@ -92,6 +96,7 @@ def download_dataset():
     import threading
     import json
     import queue
+    import requests
     from pathlib import Path
     from flask import Response
     import copy
@@ -114,7 +119,7 @@ def download_dataset():
 
     if not source or not dataset_id:
         return jsonify({'error': 'Source and dataset_id are required'}), 400
-
+ 
     kaggle_username = request.headers.get('X-Kaggle-Username')
     kaggle_key = request.headers.get('X-Kaggle-Key')
 
@@ -123,7 +128,6 @@ def download_dataset():
 
     if source.lower() == 'kaggle':
         try:
-
             authenticate_kaggle(kaggle_username, kaggle_key)
         except Exception as e:
             return jsonify({'error': f'Kaggle authentication failed: {str(e)}'}), 401
@@ -139,6 +143,14 @@ def download_dataset():
             return jsonify({'error': f'Unable to create downloads directory: {str(e)}'}), 500
 
     safe_name = dataset_id.replace('/', '_').replace('\\', '_')
+
+    cancel_event = threading.Event()
+
+    active_downloads[safe_name] = {
+        'dataset_id': dataset_id,
+        'cancel_event': cancel_event,
+        'start_time': time.time()
+    }
 
     status_queue = queue.Queue()
 
@@ -157,7 +169,6 @@ def download_dataset():
         yield f"data: {json.dumps(download_status)}\n\n"
 
         try:
-
             if not os.path.exists(download_path):
                 os.makedirs(download_path, exist_ok=True)
                 download_status['message'] = f"Created directory: {download_path}"
@@ -188,7 +199,6 @@ def download_dataset():
                 return
 
             if source.lower() == 'kaggle':
-
                 download_status['state'] = 'downloading'
                 download_status['message'] = f"Starting download of {dataset_id}"
                 download_status['download_path'] = final_download_path
@@ -216,8 +226,16 @@ def download_dataset():
                         stalled_count = 0
                         max_stalled_allowed = 40
 
-                        while not download_completed.is_set():
+                        while not download_completed.is_set() and not cancel_event.is_set():
                             time.sleep(check_interval)
+
+                            if cancel_event.is_set():
+                                status_queue.put({
+                                    'state': 'cancelled',
+                                    'progress': 0,
+                                    'message': 'Download cancelled by user :('
+                                })
+                                break
 
                             try:
                                 current_size = 0
@@ -247,7 +265,6 @@ def download_dataset():
                                         if not estimated_total_size or stalled_count > max_stalled_allowed:
                                             time_elapsed = current_time - start_time
                                             if time_elapsed > 5:
-
                                                 new_estimate = current_size + \
                                                     (avg_speed * 30)
                                                 if estimated_total_size is None:
@@ -263,7 +280,6 @@ def download_dataset():
                                                 (current_size - initial_size) / denominator * 100)
                                             progress = min(progress, 99)
                                         else:
-
                                             progress = 0
 
                                         if progress != last_progress_reported:
@@ -277,7 +293,6 @@ def download_dataset():
                                                 'time_elapsed': int(current_time - start_time)
                                             }
                                             status_queue.put(status)
-                                            last_progress_reported = progress
 
                                 last_size = current_size
                                 last_update_time = current_time
@@ -297,9 +312,17 @@ def download_dataset():
 
                 download_thread_error = [None]
 
+                download_request = [None]
+
                 def perform_download(username, key, dataset):
-                    """Perform download in separate thread with its own API authentication."""
+                    """Perform download in separate thread using direct requests instead of Kaggle API."""
                     try:
+                        if cancel_event.is_set():
+                            status_queue.put({
+                                'state': 'cancelled',
+                                'message': 'Download cancelled before it started'
+                            })
+                            return
 
                         import kaggle
                         from kaggle.api.kaggle_api_extended import KaggleApi
@@ -307,15 +330,70 @@ def download_dataset():
                         os.environ['KAGGLE_USERNAME'] = username
                         os.environ['KAGGLE_KEY'] = key
 
-                        thread_api = KaggleApi()
-                        thread_api.authenticate()
+                        api = KaggleApi()
+                        api.authenticate()
 
-                        thread_api.dataset_download_files(
-                            dataset,
-                            path=final_download_path,
-                            unzip=unzip,
-                            quiet=False
-                        )
+                        dataset_owner, dataset_name = dataset.split('/')
+
+                        auth_token = f"{username}:{key}"
+                        encoded_token = base64.b64encode(
+                            auth_token.encode()).decode()
+                        headers = {
+                            "Authorization": f"Basic {encoded_token}",
+                            "User-Agent": "Kaggle/1.5.12"
+                        }
+
+                        download_url = f"https://www.kaggle.com/api/v1/datasets/download/{dataset}"
+
+                        if cancel_event.is_set():
+                            status_queue.put({
+                                'state': 'cancelled',
+                                'message': 'Download cancelled before started'
+                            })
+                            return
+
+                        zip_path = os.path.join(
+                            final_download_path, f"{dataset_name}.zip")
+
+                        with requests.get(download_url, headers=headers, stream=True) as req:
+
+                            download_request[0] = req
+
+                            if req.status_code != 200:
+                                raise Exception(
+                                    f"Download failed with status code {req.status_code}: {req.text}")
+
+                            total_size = int(
+                                req.headers.get('content-length', 0))
+                            if total_size > 0:
+                                status_queue.put({
+                                    'state': 'downloading',
+                                    'message': f"Starting download of {format_size(total_size)}",
+                                    'total_size': total_size
+                                })
+
+                            with open(zip_path, 'wb') as f:
+                                for chunk in req.iter_content(chunk_size=8192):
+                                    if cancel_event.is_set():
+
+                                        req.close()
+                                        download_completed.set()
+                                        status_queue.put({
+                                            'state': 'cancelled',
+                                            'message': 'Download cancelled by user'
+                                        })
+                                        return
+
+                                    if chunk:
+                                        f.write(chunk)
+
+                        if unzip and zip_path.endswith('.zip') and os.path.exists(zip_path):
+                            import zipfile
+                            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                                zip_ref.extractall(final_download_path)
+
+                            if os.path.exists(zip_path):
+                                os.remove(zip_path)
 
                         files = []
                         for root, _, filenames in os.walk(final_download_path):
@@ -334,29 +412,6 @@ def download_dataset():
                                     'size': file_size,
                                     'size_formatted': format_size(file_size),
                                     'container_path': full_path if is_docker else None,
-                                    'host_path': host_path
-                                })
-
-                        if not files:
-                            import glob
-                            all_files = glob.glob(
-                                f"{final_download_path}/**/*.*", recursive=True)
-
-                            for file_path in all_files:
-                                file_path = file_path.replace('\\', '/')
-                                filename = os.path.basename(file_path)
-                                host_path = file_path
-                                if is_docker:
-                                    host_path = file_path.replace(
-                                        '/app/downloads', './downloads')
-
-                                file_size = os.path.getsize(file_path)
-                                files.append({
-                                    'name': filename,
-                                    'path': file_path,
-                                    'size': file_size,
-                                    'size_formatted': format_size(file_size),
-                                    'container_path': file_path if is_docker else None,
                                     'host_path': host_path
                                 })
 
@@ -387,6 +442,8 @@ def download_dataset():
                         })
                     finally:
                         download_completed.set()
+                        if safe_name in active_downloads:
+                            del active_downloads[safe_name]
 
                 download_thread = threading.Thread(
                     target=perform_download,
@@ -397,17 +454,49 @@ def download_dataset():
 
                 while not download_completed.is_set() or not status_queue.empty():
                     try:
-
                         status_update = status_queue.get(timeout=0.5)
 
+                        if status_update.get('state') == 'cancelled':
+                            download_status.update(status_update)
+                            yield f"data: {json.dumps(download_status)}\n\n"
+
+                            try:
+                                import shutil
+                                if os.path.exists(final_download_path):
+                                    shutil.rmtree(final_download_path)
+                            except Exception as e:
+
+                                print(
+                                    f"Error cleaning up after cancellation: {str(e)}")
+
+                            return
+
                         download_status.update(status_update)
-
                         yield f"data: {json.dumps(download_status)}\n\n"
-
                         status_queue.task_done()
                     except queue.Empty:
+                        if cancel_event.is_set() and not download_completed.is_set():
 
-                        pass
+                            if download_request[0] is not None:
+                                try:
+                                    download_request[0].close()
+                                except:
+                                    pass
+
+                            download_status.update({
+                                'state': 'cancelled',
+                                'message': 'Download cancelled by user'
+                            })
+                            yield f"data: {json.dumps(download_status)}\n\n"
+
+                            try:
+                                import shutil
+                                if os.path.exists(final_download_path):
+                                    shutil.rmtree(final_download_path)
+                            except:
+                                pass
+
+                            return
 
                 if download_thread_error[0]:
                     download_status['state'] = 'error'
@@ -425,6 +514,9 @@ def download_dataset():
             download_status['error'] = str(err)
             download_status['message'] = f'Download error: {str(err)}'
             yield f"data: {json.dumps(download_status)}\n\n"
+        finally:
+            if safe_name in active_downloads:
+                del active_downloads[safe_name]
 
     def format_size(size_bytes):
         """Format bytes into a human-readable string."""
@@ -438,6 +530,51 @@ def download_dataset():
             return f"{size_bytes/(1024*1024*1024):.1f} GB"
 
     return Response(event_stream(), mimetype="text/event-stream")
+
+
+@app.route('/api/datasets/cancel', methods=['POST'])
+def cancel_dataset_download():
+    """
+    Cancels an in-progress dataset download.
+
+    HTTP Method: POST
+    Route: /api/datasets/cancel
+
+    Request Body:
+        dataset_id: ID of the dataset being downloaded that should be cancelled
+
+    Returns:
+        JSON response indicating success or failure of the cancellation request
+    """
+    data = request.json
+    dataset_id = data.get('dataset_id')
+
+    if not dataset_id:
+        return jsonify({'error': 'dataset_id is required'}), 400
+
+    safe_key = dataset_id.replace('/', '_').replace('\\', '_')
+
+    if safe_key not in active_downloads:
+        return jsonify({
+            'success': False,
+            'message': f'No active download found for dataset: {dataset_id}'
+        }), 404
+
+    cancel_event = active_downloads[safe_key].get('cancel_event')
+
+    if not cancel_event:
+        return jsonify({
+            'success': False,
+            'message': 'Download exists but cannot be cancelled (no cancel event)'
+        }), 500
+
+    cancel_event.set()
+
+    return jsonify({
+        'success': True,
+        'message': f'Cancellation signal sent for dataset: {dataset_id}',
+        'dataset_id': dataset_id
+    })
 
 
 @cache.memoize(timeout=300)
@@ -1043,38 +1180,6 @@ def get_dataset_suggestions(query, source, limit=5):
 
 @app.route('/api/suggestions', methods=['GET'])
 def get_suggestions():
-    """
-    Flask endpoint that provides dataset name suggestions based on a search query.
-
-    This endpoint provides autocomplete/typeahead functionality for dataset names from
-    either Kaggle, Hugging Face, or both sources. It handles authentication for both
-    platforms and returns dataset titles or IDs that match the query string.
-
-    HTTP Method: GET
-    Route: /api/suggestions
-
-    Request Headers:
-        X-Kaggle-Username (optional): Kaggle username for authentication
-        X-Kaggle-Key (optional): Kaggle API key for authentication
-        X-HF-Token (optional): Hugging Face API token for authentication
-
-    Query Parameters:
-        query (str, required): Search term to find matching dataset names
-        source (str, optional): Source to get suggestions from. Defaults to 'all'.
-            Valid options are: 'all', 'kaggle', 'huggingface'
-        limit (int, optional): Maximum number of suggestions to return per source. Defaults to 5.
-
-    Returns:
-        JSON response containing:
-        - A dictionary with keys for each requested source ('kaggle', 'huggingface')
-        - Each source key contains either a list of dataset names or an error message
-        - Returns empty array if query length is less than 1 character
-        - For Kaggle, returns an error if credentials are not provided
-
-    Note:
-        - Authentication is required for Kaggle suggestions, optional for Hugging Face
-        - Results are cached for 5 minutes to improve performance
-    """
     query = request.args.get('query', '')
     source = request.args.get('source', 'all')
     limit = int(request.args.get('limit', 5))
@@ -1098,24 +1203,7 @@ def get_suggestions():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """
-    Flask endpoint that provides a health check for the service.
-
-    This endpoint returns basic information about the service status and can be used
-    by monitoring tools to verify that the API is operational.
-
-    HTTP Method: GET
-    Route: /health
-
-    Returns:
-        JSON response containing:
-        - status: 'ok' if the service is running properly
-        - version: API version information
-        - timestamp: Current server time
-
-    Status Code:
-        200: Service is healthy and operational
-    """
+    
     return jsonify({
         'status': 'ok',
         'version': '1.0.0',
