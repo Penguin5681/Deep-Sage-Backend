@@ -6,6 +6,10 @@ import os
 from flask_caching import Cache
 from dotenv import load_dotenv
 import threading
+from data_processor import data_api
+from excel_to_csv import convert_api
+from ollama.ollama_insights import insights_api
+from data_processing.csv_insights import csv_insights_api
 
 load_dotenv()
 
@@ -15,6 +19,10 @@ cache_config = {
 }
 
 app = Flask(__name__)
+app.register_blueprint(data_api)
+app.register_blueprint(convert_api)
+app.register_blueprint(insights_api)
+app.register_blueprint(csv_insights_api)
 
 cache = Cache(app, config=cache_config)
 
@@ -119,7 +127,7 @@ def download_dataset():
 
     if not source or not dataset_id:
         return jsonify({'error': 'Source and dataset_id are required'}), 400
- 
+
     kaggle_username = request.headers.get('X-Kaggle-Username')
     kaggle_key = request.headers.get('X-Kaggle-Key')
 
