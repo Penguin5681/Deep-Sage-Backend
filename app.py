@@ -7,7 +7,7 @@ from flask_caching import Cache
 from dotenv import load_dotenv
 import threading
 from data_processor import data_api
-from excel_to_csv import convert_api
+from data_processing.excel_to_csv import convert_api
 from ollama.ollama_insights import insights_api
 from data_processing.csv_insights import csv_insights_api
 
@@ -734,11 +734,11 @@ def retrieve_kaggle_dataset():
 
             try:
                 dataset = kaggle_api.dataset_metadata(owner, slug)
-
+                print("DATASET: ", dataset)
                 result = {
                     'id': dataset_id,
                     'title': dataset['title'],
-                    'owner': dataset['ownerName'],
+                    'owner': getattr(dataset, 'userName', getattr(dataset, 'owner', {}).get('username', 'Unknown')),
                     'url': f'https://www.kaggle.com/datasets/{dataset_id}',
                     'size': dataset.get('totalBytes', 'Unknown'),
                     'lastUpdated': dataset.get('lastUpdated', 'Unknown'),
@@ -765,7 +765,6 @@ def retrieve_kaggle_dataset():
                     }), 404
         else:
             datasets = list(kaggle_api.dataset_list(search=dataset_id))
-
             dataset = None
             for ds in datasets:
                 if ds.title.lower() == dataset_id.lower():
