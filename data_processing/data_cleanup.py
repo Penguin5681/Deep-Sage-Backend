@@ -12,126 +12,75 @@ def handle_null_values(df: pd.DataFrame, method: str = 'nan', columns: Optional[
                        inplace: bool = False) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Check for null values and replace them with specified values based on data type.
-
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        The dataframe to check for null values
-    method : str
-        Method to handle null values: 'nan', 'zero', 'mean', 'median', 'mode', 'custom'
-    columns : list, optional
-        List of column names to check. If None, check all columns
-    numeric_fill : int or float, optional
-        Custom value to fill numeric nulls when method='custom'
-    categorical_fill : str, optional
-        Value to fill categorical nulls when method='custom'
-    date_fill : str, optional
-        Value to fill datetime nulls (ISO format) when method='custom'
-    inplace : bool, default False
-        Whether to perform operation in-place on input df
-
-    Returns:
-    --------
-    pandas.DataFrame
-        The dataframe with null values handled
-    dict
-        A report of null values before and after handling
     """
     if columns is None:
         columns = df.columns.tolist()
-    else:
-        columns = [col for col in columns if col in df.columns]
 
     df_result = df if inplace else df.copy()
+
+    for col in columns:
+        if df_result[col].dtype == 'object':
+            df_result[col] = df_result[col].replace('', pd.NA)
+            df_result[col] = df_result[col].replace('null', pd.NA)
+            df_result[col] = df_result[col].replace('NULL', pd.NA)
+            df_result[col] = df_result[col].replace('NA', pd.NA)
 
     null_counts = df_result[columns].isna().sum()
     null_report = {
         'before': {col: int(null_counts[col]) for col in columns},
         'replaced_values': {},
-        'method_used': method
+        'method_used': method,
+        'after': {}
     }
 
-    numeric_cols = df_result[columns].select_dtypes(include=['number']).columns
-    datetime_cols = df_result[columns].select_dtypes(
-        include=['datetime']).columns
-    categorical_cols = list(
-        set(columns) - set(numeric_cols) - set(datetime_cols))
+    for col in columns:
+        if null_counts[col] > 0:
+            col_dtype = df_result[col].dtype
+            is_numeric = pd.api.types.is_numeric_dtype(col_dtype)
+            is_datetime = pd.api.types.is_datetime64_dtype(col_dtype)
 
-    if method == 'zero':
-        if numeric_cols.any():
-            df_result[numeric_cols] = df_result[numeric_cols].fillna(0)
-            for col in numeric_cols:
-                if null_counts[col] > 0:
-                    null_report['replaced_values'][col] = {
-                        'method': 'zero', 'count': int(null_counts[col])}
+            if method == 'nan':
 
-        if categorical_cols:
-            df_result[categorical_cols] = df_result[categorical_cols].fillna(
-                'unknown')
-            for col in categorical_cols:
-                if null_counts[col] > 0:
-                    null_report['replaced_values'][col] = {
-                        'method': 'unknown', 'count': int(null_counts[col])}
+                continue
+            elif method == 'zero':
+                if is_numeric:
+                    fill_value = 0
+                elif is_datetime:
+                    if date_fill:
+                        fill_value = pd.to_datetime(date_fill)
+                    else:
+                        continue
+                else:
+                    fill_value = ''
+            elif method == 'mean' and is_numeric:
+                fill_value = df_result[col].mean()
+            elif method == 'median' and is_numeric:
+                fill_value = df_result[col].median()
+            elif method == 'mode':
 
-    elif method == 'mean' and numeric_cols.any():
-        for col in numeric_cols:
-            if null_counts[col] > 0:
-                mean_val = df_result[col].mean()
-                df_result[col] = df_result[col].fillna(mean_val)
-                null_report['replaced_values'][col] = {
-                    'method': 'mean', 'value': float(mean_val), 'count': int(null_counts[col])}
+                mode_values = df_result[col].mode()
+                if len(mode_values) > 0:
+                    fill_value = mode_values[0]
+                else:
+                    continue
+            elif method == 'custom':
+                if is_numeric and numeric_fill is not None:
+                    fill_value = numeric_fill
+                elif is_datetime and date_fill:
+                    fill_value = pd.to_datetime(date_fill)
+                else:
+                    fill_value = categorical_fill
+            else:
 
-    elif method == 'median' and numeric_cols.any():
-        for col in numeric_cols:
-            if null_counts[col] > 0:
-                median_val = df_result[col].median()
-                df_result[col] = df_result[col].fillna(median_val)
-                null_report['replaced_values'][col] = {
-                    'method': 'median', 'value': float(median_val), 'count': int(null_counts[col])}
+                if is_numeric:
+                    fill_value = 0
+                elif is_datetime:
+                    continue
+                else:
+                    fill_value = categorical_fill
 
-    elif method == 'mode':
-        for col in columns:
-            if null_counts[col] > 0:
-                mode_val = df_result[col].mode()[0]
-                df_result[col] = df_result[col].fillna(mode_val)
-                mode_display = str(mode_val) if not pd.isna(
-                    mode_val) else 'NaN'
-                null_report['replaced_values'][col] = {
-                    'method': 'mode', 'value': mode_display, 'count': int(null_counts[col])}
-
-    elif method == 'custom':
-        if numeric_cols.any() and numeric_fill is not None:
-            df_result[numeric_cols] = df_result[numeric_cols].fillna(
-                numeric_fill)
-            for col in numeric_cols:
-                if null_counts[col] > 0:
-                    null_report['replaced_values'][col] = {
-                        'method': 'custom', 'value': numeric_fill, 'count': int(null_counts[col])}
-
-        if categorical_cols and categorical_fill is not None:
-            df_result[categorical_cols] = df_result[categorical_cols].fillna(
-                categorical_fill)
-            for col in categorical_cols:
-                if null_counts[col] > 0:
-                    null_report['replaced_values'][col] = {
-                        'method': 'custom', 'value': categorical_fill, 'count': int(null_counts[col])}
-
-        if datetime_cols.any() and date_fill is not None:
-            try:
-                date_value = pd.to_datetime(date_fill)
-                df_result[datetime_cols] = df_result[datetime_cols].fillna(
-                    date_value)
-                for col in datetime_cols:
-                    if null_counts[col] > 0:
-                        null_report['replaced_values'][col] = {
-                            'method': 'custom', 'value': date_fill, 'count': int(null_counts[col])}
-            except:
-                pass
-    else:
-        for col in columns:
-            if null_counts[col] > 0:
-                null_report['replaced_values'][col] = {
-                    'method': 'left as NaN', 'count': int(null_counts[col])}
+            df_result[col] = df_result[col].fillna(fill_value)
+            null_report['replaced_values'][col] = fill_value
 
     null_report['after'] = {
         col: int(df_result[col].isna().sum()) for col in columns}
@@ -1195,7 +1144,6 @@ def correct_inconsistent_values(df: pd.DataFrame, columns: Optional[List[str]] =
                 }
 
     return df_result, correction_report
-
 
 def clean_dataframe(df: pd.DataFrame,
                     null_method: str = 'nan',

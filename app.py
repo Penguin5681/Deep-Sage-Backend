@@ -10,6 +10,7 @@ from data_processor import data_api
 from data_processing.excel_to_csv import convert_api
 from ollama.ollama_insights import insights_api
 from data_processing.csv_insights import csv_insights_api
+from data_processing_flask_api.fix_basics_tab_api import data_cleaning_api  
 
 load_dotenv()
 
@@ -23,6 +24,7 @@ app.register_blueprint(data_api)
 app.register_blueprint(convert_api)
 app.register_blueprint(insights_api)
 app.register_blueprint(csv_insights_api)
+app.register_blueprint(data_cleaning_api) 
 
 cache = Cache(app, config=cache_config)
 
