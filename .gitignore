@@ -1,3 +1,5 @@
 __pycache__/
 *.py[cod]
 *$py.class
+deep_sage_env
+venv
