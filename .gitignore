@@ -3,3 +3,4 @@ __pycache__/
 *$py.class
 deep_sage_env
 venv
+.env

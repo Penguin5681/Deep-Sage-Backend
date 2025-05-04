@@ -1,16 +1,17 @@
 import base64
 from kaggle.api.kaggle_api_extended import KaggleApi
 import datetime
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 import os
 from flask_caching import Cache
 from dotenv import load_dotenv
 import threading
 from data_processor import data_api
 from data_processing.excel_to_csv import convert_api
+from data_visualizations.pie_chart import pie_chart_bp
 from ollama.ollama_insights import insights_api
 from data_processing.csv_insights import csv_insights_api
-from data_processing_flask_api.fix_basics_tab_api import data_cleaning_api  
+from data_processing_flask_api.fix_basics_tab_api import data_cleaning_api
 
 load_dotenv()
 
@@ -24,7 +25,9 @@ app.register_blueprint(data_api)
 app.register_blueprint(convert_api)
 app.register_blueprint(insights_api)
 app.register_blueprint(csv_insights_api)
-app.register_blueprint(data_cleaning_api) 
+app.register_blueprint(data_cleaning_api)
+app.register_blueprint(pie_chart_bp)
+
 
 cache = Cache(app, config=cache_config)
 
@@ -73,6 +76,9 @@ def get_kaggle_datasets(limit=5, sort_by='hottest'):
     except Exception as e:
         return {'error': str(e)}
 
+@app.route('/static/pie_charts/<path:filename>')
+def download_pie_chart(filename):
+    return send_from_directory('/tmp/pie_charts', filename)
 
 @app.route('/api/datasets/kaggle', methods=['GET'])
 def get_kaggle_datasets_endpoint():
