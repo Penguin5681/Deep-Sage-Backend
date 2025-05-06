@@ -76,9 +76,11 @@ def get_kaggle_datasets(limit=5, sort_by='hottest'):
     except Exception as e:
         return {'error': str(e)}
 
+
 @app.route('/static/pie_charts/<path:filename>')
 def download_pie_chart(filename):
     return send_from_directory('/tmp/pie_charts', filename)
+
 
 @app.route('/api/datasets/kaggle', methods=['GET'])
 def get_kaggle_datasets_endpoint():
@@ -1218,12 +1220,430 @@ def get_suggestions():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    
+
     return jsonify({
         'status': 'ok',
         'version': '1.0.0',
         'timestamp': datetime.datetime.now().isoformat()
     })
+
+
+@app.route('/api/docs', methods=['GET'])
+def api_documentation():
+    """
+    Returns documentation for all API endpoints.
+
+    This endpoint provides a comprehensive overview of all available API endpoints,
+    their HTTP methods, required parameters, headers, and descriptions.
+
+    Returns:
+        JSON response containing documentation for all API endpoints
+    """
+    api_docs = {
+        "version": "1.0.0",
+        "baseUrl": request.url_root,
+        "endpoints": [
+            {
+                "path": "/static/pie_charts/<filename>",
+                "method": "GET",
+                "description": "Retrieves a generated pie chart image file",
+                "parameters": [
+                    {
+                        "name": "filename",
+                        "in": "path",
+                        "description": "Name of the pie chart image file",
+                        "required": True
+                    }
+                ],
+                "responses": {
+                    "200": "Returns the requested pie chart image",
+                    "404": "Chart not found"
+                }
+            },
+            {
+                "path": "/api/datasets/kaggle",
+                "method": "GET",
+                "description": "Retrieves a list of popular datasets from Kaggle",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication",
+                        "required": True
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication",
+                        "required": True
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum number of datasets to return",
+                        "required": False,
+                        "default": 5
+                    },
+                    {
+                        "name": "sort_by",
+                        "in": "query",
+                        "description": "Sort datasets by this criteria",
+                        "required": False,
+                        "default": "hottest",
+                        "options": ["hottest", "votes", "updated", "active", "published"]
+                    }
+                ],
+                "responses": {
+                    "200": "List of datasets",
+                    "401": "Authentication failed",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/datasets/download",
+                "method": "POST",
+                "description": "Downloads a dataset from Kaggle with real-time progress updates via Server-Sent Events",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication",
+                        "required": True
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication",
+                        "required": True
+                    }
+                ],
+                "requestBody": {
+                    "content": "application/json",
+                    "schema": {
+                        "source": "Source of the dataset (e.g., 'kaggle')",
+                        "dataset_id": "ID of the dataset to download",
+                        "path": "Optional download path",
+                        "unzip": "Whether to unzip the downloaded file (boolean)"
+                    }
+                },
+                "responses": {
+                    "200": "Stream of Server-Sent Events with download progress",
+                    "400": "Missing required parameters",
+                    "401": "Authentication failed",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/datasets/cancel",
+                "method": "POST",
+                "description": "Cancels an in-progress dataset download",
+                "requestBody": {
+                    "content": "application/json",
+                    "schema": {
+                        "dataset_id": "ID of the dataset being downloaded that should be cancelled"
+                    }
+                },
+                "responses": {
+                    "200": "Cancellation successful",
+                    "400": "Missing dataset_id",
+                    "404": "No active download found",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/search/kaggle",
+                "method": "GET",
+                "description": "Searches for Kaggle datasets matching a query string",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication",
+                        "required": True
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication",
+                        "required": True
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "query",
+                        "in": "query",
+                        "description": "Search term to find matching datasets",
+                        "required": True
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum number of datasets to return",
+                        "required": False,
+                        "default": 5
+                    }
+                ],
+                "responses": {
+                    "200": "List of datasets matching the query",
+                    "400": "Missing query parameter",
+                    "401": "Authentication failed",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/retrieve-kaggle-dataset",
+                "method": "GET",
+                "description": "Retrieves metadata for a specific Kaggle dataset",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication",
+                        "required": True
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication",
+                        "required": True
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "dataset_id",
+                        "in": "query",
+                        "description": "The Kaggle dataset identifier (username/dataset-name or dataset name)",
+                        "required": True
+                    }
+                ],
+                "responses": {
+                    "200": "Dataset metadata",
+                    "400": "Missing dataset_id parameter",
+                    "401": "Authentication failed",
+                    "404": "Dataset not found",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/datasets/finance",
+                "method": "GET",
+                "description": "Retrieves finance-related datasets from Kaggle",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication",
+                        "required": True
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication",
+                        "required": True
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum number of datasets to return",
+                        "required": False,
+                        "default": 10
+                    },
+                    {
+                        "name": "sort_by",
+                        "in": "query",
+                        "description": "Sort datasets by this criteria",
+                        "required": False,
+                        "default": "hottest",
+                        "options": ["hottest", "votes", "updated", "active", "published"]
+                    }
+                ],
+                "responses": {
+                    "200": "List of finance-related datasets",
+                    "401": "Authentication failed",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/datasets/technology",
+                "method": "GET",
+                "description": "Retrieves technology-related datasets from Kaggle",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication",
+                        "required": True
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication",
+                        "required": True
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum number of datasets to return",
+                        "required": False,
+                        "default": 10
+                    },
+                    {
+                        "name": "sort_by",
+                        "in": "query",
+                        "description": "Sort datasets by this criteria",
+                        "required": False,
+                        "default": "hottest",
+                        "options": ["hottest", "votes", "updated", "active", "published"]
+                    }
+                ],
+                "responses": {
+                    "200": "List of technology-related datasets",
+                    "401": "Authentication failed",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/datasets/healthcare",
+                "method": "GET",
+                "description": "Retrieves healthcare-related datasets from Kaggle",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication",
+                        "required": True
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication",
+                        "required": True
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum number of datasets to return",
+                        "required": False,
+                        "default": 10
+                    },
+                    {
+                        "name": "sort_by",
+                        "in": "query",
+                        "description": "Sort datasets by this criteria",
+                        "required": False,
+                        "default": "hottest",
+                        "options": ["hottest", "votes", "updated", "active", "published"]
+                    }
+                ],
+                "responses": {
+                    "200": "List of healthcare-related datasets",
+                    "401": "Authentication failed",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/search",
+                "method": "GET",
+                "description": "Unified search endpoint for datasets across multiple sources",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication (required for Kaggle search)",
+                        "required": False
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication (required for Kaggle search)",
+                        "required": False
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "query",
+                        "in": "query",
+                        "description": "Search term to find matching datasets",
+                        "required": True
+                    },
+                    {
+                        "name": "source",
+                        "in": "query",
+                        "description": "Source to search in",
+                        "required": False,
+                        "default": "all",
+                        "options": ["all", "kaggle"]
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum number of datasets to return per source",
+                        "required": False,
+                        "default": 5
+                    }
+                ],
+                "responses": {
+                    "200": "Dictionary with search results from each source",
+                    "400": "Missing query parameter",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/api/suggestions",
+                "method": "GET",
+                "description": "Get dataset name suggestions for autocomplete functionality",
+                "headers": [
+                    {
+                        "name": "X-Kaggle-Username",
+                        "description": "Kaggle username for authentication (required for Kaggle suggestions)",
+                        "required": False
+                    },
+                    {
+                        "name": "X-Kaggle-Key",
+                        "description": "Kaggle API key for authentication (required for Kaggle suggestions)",
+                        "required": False
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "query",
+                        "in": "query",
+                        "description": "Partial search term to find matching dataset names",
+                        "required": True
+                    },
+                    {
+                        "name": "source",
+                        "in": "query",
+                        "description": "Source to get suggestions from",
+                        "required": False,
+                        "default": "all",
+                        "options": ["all", "kaggle"]
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum number of suggestions to return",
+                        "required": False,
+                        "default": 5
+                    }
+                ],
+                "responses": {
+                    "200": "List of dataset title suggestions",
+                    "500": "Server error"
+                }
+            },
+            {
+                "path": "/health",
+                "method": "GET",
+                "description": "Health check endpoint to verify API is operational",
+                "responses": {
+                    "200": "API is operational with status information"
+                }
+            },
+            {
+                "path": "/api/docs",
+                "method": "GET",
+                "description": "This documentation endpoint",
+                "responses": {
+                    "200": "API documentation"
+                }
+            }
+        ]
+    }
+
+    return jsonify(api_docs)
 
 
 if __name__ == '__main__':

@@ -1,333 +1,140 @@
 # Deep Sage Backend
 
-A Flask-based backend service for exploring and downloading datasets from Kaggle and Hugging Face.
+Deep Sage Backend is a Flask-based API that serves as an intermediary for accessing, downloading, and analyzing data from Kaggle.
 
-## Features
+## Prerequisites
 
-- Search datasets from Kaggle and Hugging Face
-- Get popular/trending datasets
-- View dataset configurations and information
-- Download datasets with specific configurations
-- Intelligent search suggestions
-- API response caching
+- Python 3.8 or higher
+- pip (Python package installer)
+- Kaggle account with API key
 
 ## Installation
 
 1. Clone the repository:
-    ```bash
-    git clone https://github.com/Penguin5681/deep_sage_backend.git
-    cd deep_sage_backend
-    ```
 
-2. Install required packages:
-    ```bash
-    pip install flask kaggle huggingface_hub datasets flask_caching requests
-    ```
+```bash
+git clone https://github.com/yourusername/Deep-Sage-Backend.git
+cd Deep-Sage-Backend
+```
 
-3. Set up API credentials:
-    - For Kaggle: Get your username and API key from your [Kaggle account settings](https://www.kaggle.com/account)
-    - For Hugging Face: Get your token from your [Hugging Face settings](https://huggingface.co/settings/tokens)
+2. Create a virtual environment:
 
-## Usage
+```bash
+# On Windows
+python -m venv venv
+venv\Scripts\activate
 
-Start the server:
+# On macOS/Linux
+python -m venv venv
+source venv/bin/activate
+```
+
+3. Install required packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Kaggle API Setup
+
+The backend requires Kaggle API credentials to access datasets:
+
+1. Create a Kaggle account at [kaggle.com](https://www.kaggle.com/) if you don't have one
+2. Go to your account settings: https://www.kaggle.com/settings
+3. In the "API" section, click "Create New API Token"
+4. This will download a `kaggle.json` file containing your credentials
+
+### Placing kaggle.json (OS-specific instructions)
+
+#### Windows:
+```bash
+mkdir %USERPROFILE%\.kaggle
+copy path\to\downloaded\kaggle.json %USERPROFILE%\.kaggle\
+```
+
+#### macOS:
+```bash
+mkdir -p ~/.kaggle
+cp path/to/downloaded/kaggle.json ~/.kaggle/
+chmod 600 ~/.kaggle/kaggle.json
+```
+
+#### Linux:
+```bash
+mkdir -p ~/.kaggle
+cp path/to/downloaded/kaggle.json ~/.kaggle/
+chmod 600 ~/.kaggle/kaggle.json
+```
+
+## Environment Variables Setup
+
+Create a .env file in the root directory of the project:
+
+```
+KAGGLE_USERNAME=your_kaggle_username
+KAGGLE_KEY=your_kaggle_api_key
+OPEN_AI_API_KEY=your_openai_api_key  # Optional: only needed if using OpenAI features
+```
+
+Replace the placeholder values with your actual credentials:
+- `your_kaggle_username`: Your Kaggle account username
+- `your_kaggle_api_key`: Your Kaggle API key from the kaggle.json file
+- `your_openai_api_key`: Your OpenAI API key (if using OpenAI features)
+
+## Running the Application
+
+Start the Flask server:
+
 ```bash
 python app.py
 ```
 
-The API will be available at `http://localhost:5000`.
+The server will start on `http://localhost:5000` by default.
 
-## API Endpoints
+## API Documentation
 
-### 1. Get Trending Datasets
-
-**Endpoint:** `GET /api/datasets`
-
-**Description:** Retrieve trending datasets from Kaggle and/or Hugging Face.
-
-**Query Parameters:**
-- `source`: Data source (`all`, `kaggle`, or `huggingface`)
-- `limit`: Maximum number of results (default: 5)
-- `kaggle_sort`: Sort method for Kaggle (`hottest`, `votes`, `updated`, `active`, `published`)
-- `hf_sort`: Sort method for HuggingFace (`downloads`, `trending`, `modified`)
-
-**Headers:**
-- `X-Kaggle-Username`: Kaggle username (required for Kaggle)
-- `X-Kaggle-Key`: Kaggle API key (required for Kaggle)
-- `X-HF-Token`: Hugging Face token (optional)
-
-**Example Request:**
-```bash
-curl -X GET "http://localhost:5000/api/datasets?source=all&limit=3" \
-  -H "X-Kaggle-Username: your_username" \
-  -H "X-Kaggle-Key: your_api_key"
+Once the server is running, you can access the API documentation at:
+```
+http://localhost:5000/api/docs
 ```
 
-**Example Response:**
-```json
-{
-  "kaggle": [
-    {
-      "id": "allen-institute-for-ai/cord-19",
-      "title": "COVID-19 Research Dataset",
-      "owner": "Allen Institute for AI",
-      "url": "https://www.kaggle.com/datasets/allen-institute-for-ai/cord-19",
-      "size": "5.78GB",
-      "lastUpdated": "2023-05-15",
-      "downloadCount": 12500,
-      "voteCount": 475,
-      "description": "COVID-19 Open Research Dataset"
-    }
-  ],
-  "huggingface": [
-    {
-      "id": "databricks/dolly-15k",
-      "author": "Databricks",
-      "url": "https://huggingface.co/datasets/databricks/dolly-15k",
-      "downloads": 87642,
-      "likes": 312,
-      "lastModified": "2023-04-12",
-      "tags": ["instruction-tuning", "llm", "text"],
-      "description": "Databricks' Dolly-15k, a publicly available human-generated dataset for instruction tuning"
-    }
-  ]
-}
+## Main Features
+
+- Search and browse Kaggle datasets with filtering options
+- Download datasets with real-time progress tracking
+- Cancel in-progress downloads
+- Convert data between formats (Excel to CSV)
+- Generate data visualizations
+- Get AI-powered insights on datasets
+
+## API Health Check
+
+To verify that the API is running correctly:
+```
+GET http://localhost:5000/health
 ```
 
-### 2. Get Dataset Configurations
+## Troubleshooting
 
-**Endpoint:** `GET /api/datasets/configs`
+### Common Issues:
 
-**Description:** Retrieve available configurations for a Hugging Face dataset.
+1. **Authentication Errors**:
+   - Verify your Kaggle credentials in the .env file
+   - Ensure kaggle.json is in the correct location
+   - Check that kaggle.json has the proper permissions (600)
 
-**Query Parameters:**
-- `dataset_id`: Hugging Face dataset ID (required)
+2. **Module Import Errors**:
+   - Make sure all dependencies are installed: `pip install -r requirements.txt`
+   - Verify you're in the virtual environment
 
-**Headers:**
-- `X-HF-Token`: Hugging Face token (optional)
+3. **Permission Errors**:
+   - On Linux/macOS, ensure the download directories have write permissions
 
-**Example Request:**
-```bash
-curl -X GET "http://localhost:5000/api/datasets/configs?dataset_id=glue"
-```
+4. **Timeout Issues**:
+   - Large dataset downloads may timeout; adjust your firewall settings
+   - Check your internet connection
 
-**Example Response:**
-```json
-{
-  "configs": [
-    {
-      "name": "cola",
-      "total_size_bytes": 368934,
-      "total_examples": 10657
-    },
-    {
-      "name": "sst2",
-      "total_size_bytes": 7439256,
-      "total_examples": 70042
-    },
-    {
-      "name": "mnli",
-      "total_size_bytes": 30968512,
-      "total_examples": 433872
-    }
-  ]
-}
-```
+## Security Note
 
-### 3. Search Datasets
-
-**Endpoint:** `GET /api/search`
-
-**Description:** Search for datasets across Kaggle and/or Hugging Face.
-
-**Query Parameters:**
-- `query`: Search text (required)
-- `source`: Data source (`all`, `kaggle`, or `huggingface`)
-- `limit`: Maximum number of results (default: 5)
-
-**Headers:**
-- `X-Kaggle-Username`: Kaggle username (required for Kaggle)
-- `X-Kaggle-Key`: Kaggle API key (required for Kaggle)
-- `X-HF-Token`: Hugging Face token (optional)
-
-**Example Request:**
-```bash
-curl -X GET "http://localhost:5000/api/search?query=COVID-19&source=all&limit=2" \
-  -H "X-Kaggle-Username: your_username" \
-  -H "X-Kaggle-Key: your_api_key"
-```
-
-**Example Response:**
-```json
-{
-  "kaggle": [
-    {
-      "id": "allen-institute-for-ai/cord-19",
-      "title": "COVID-19 Research Dataset",
-      "owner": "Allen Institute for AI",
-      "url": "https://www.kaggle.com/datasets/allen-institute-for-ai/cord-19",
-      "size": "5.78GB",
-      "lastUpdated": "2023-05-15",
-      "downloadCount": 12500,
-      "voteCount": 475,
-      "description": "COVID-19 Open Research Dataset"
-    }
-  ],
-  "huggingface": [
-    {
-      "id": "gsarti/covid-nli",
-      "author": "Gabriele Sarti",
-      "url": "https://huggingface.co/datasets/gsarti/covid-nli",
-      "downloads": 5432,
-      "likes": 45,
-      "lastModified": "2022-09-22",
-      "tags": ["covid", "nli", "text"],
-      "description": "Natural Language Inference dataset about COVID-19"
-    }
-  ]
-}
-```
-
-### 4. Search Hugging Face with Configuration Details
-
-**Endpoint:** `GET /api/search/huggingface`
-
-**Description:** Advanced search for Hugging Face datasets with configuration details.
-
-**Query Parameters:**
-- `query`: Search text (required)
-- `include_configs`: Include dataset configurations (`true` or `false`)
-- `config_detail`: Level of configuration detail (`none`, `basic`, or `full`)
-- `limit`: Maximum number of results (default: 5)
-
-**Headers:**
-- `X-HF-Token`: Hugging Face token (optional)
-
-**Example Request:**
-```bash
-curl -X GET "http://localhost:5000/api/search/huggingface?query=glue&include_configs=true&config_detail=basic&limit=1"
-```
-
-**Example Response:**
-```json
-{
-  "datasets": [
-    {
-      "id": "glue",
-      "author": "HuggingFace",
-      "url": "https://huggingface.co/datasets/glue",
-      "downloads": 152689,
-      "likes": 98,
-      "lastModified": "2023-03-17",
-      "tags": ["benchmark", "nlp", "evaluation"],
-      "description": "GLUE benchmark for evaluating natural language understanding systems",
-      "configs": [
-        {
-          "name": "cola",
-          "total_size_bytes": 368934,
-          "total_examples": 10657
-        },
-        {
-          "name": "sst2",
-          "total_size_bytes": 7439256,
-          "total_examples": 70042
-        }
-      ]
-    }
-  ]
-}
-```
-
-### 5. Dataset Download
-
-**Endpoint:** `POST /api/datasets/download`
-
-**Description:** Download a dataset from Kaggle or Hugging Face.
-
-**Request Body:**
-```json
-{
-  "source": "huggingface",
-  "dataset_id": "dataset_name",
-  "path": "./downloads",
-  "config": "config_name"
-}
-```
-
-**Headers:**
-- `X-Kaggle-Username`: Kaggle username (required for Kaggle)
-- `X-Kaggle-Key`: Kaggle API key (required for Kaggle)
-- `X-HF-Token`: Hugging Face token (optional)
-
-**Example Request:**
-```bash
-curl -X POST "http://localhost:5000/api/datasets/download" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source": "huggingface",
-    "dataset_id": "glue",
-    "path": "./downloads",
-    "config": "cola"
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "status": "success",
-  "message": "Dataset glue with config cola downloaded successfully",
-  "path": "./downloads/glue/cola"
-}
-```
-
-### 6. Auto-complete Suggestions
-
-**Endpoint:** `GET /api/suggestions`
-
-**Description:** Get auto-complete suggestions for partial search queries.
-
-**Query Parameters:**
-- `query`: Partial search text (required)
-- `source`: Data source (`all`, `kaggle`, or `huggingface`)
-- `limit`: Maximum number of results (default: 5)
-
-**Headers:**
-- `X-Kaggle-Username`: Kaggle username (required for Kaggle)
-- `X-Kaggle-Key`: Kaggle API key (required for Kaggle)
-- `X-HF-Token`: Hugging Face token (optional)
-
-**Example Request:**
-```bash
-curl -X GET "http://localhost:5000/api/suggestions?query=cov&source=all&limit=3" \
-  -H "X-Kaggle-Username: your_username" \
-  -H "X-Kaggle-Key: your_api_key"
-```
-
-**Example Response:**
-```json
-{
-  "suggestions": [
-    "covid-19",
-    "covid vaccine",
-    "covariance matrix"
-  ]
-}
-```
-
-## Error Handling
-
-The API returns appropriate HTTP status codes with error messages:
-
-```json
-{
-  "error": "Error message description"
-}
-```
-
-## Caching
-
-The application implements caching (5 minutes default) for search results and configuration data to improve performance.
-
-## License
-
-MIT
+- The .env file contains sensitive credentials - never commit it to version control
+- The .gitignore file is configured to exclude this file by default
