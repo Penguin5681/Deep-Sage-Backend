@@ -12,6 +12,9 @@ from data_visualizations.pie_chart import pie_chart_bp
 from ollama.ollama_insights import insights_api
 from data_processing.csv_insights import csv_insights_api
 from data_processing_flask_api.fix_basics_tab_api import data_cleaning_api
+from s3.upload_profile import upload_profile_bp
+from s3.aws_sync_operations import aws_operations_bp
+from s3.user_sync import user_sync_bp
 
 load_dotenv()
 
@@ -27,6 +30,9 @@ app.register_blueprint(insights_api)
 app.register_blueprint(csv_insights_api)
 app.register_blueprint(data_cleaning_api)
 app.register_blueprint(pie_chart_bp)
+app.register_blueprint(upload_profile_bp)
+app.register_blueprint(aws_operations_bp)
+app.register_blueprint(user_sync_bp)
 
 
 cache = Cache(app, config=cache_config)
@@ -1220,7 +1226,6 @@ def get_suggestions():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-
     return jsonify({
         'status': 'ok',
         'version': '1.0.0',
