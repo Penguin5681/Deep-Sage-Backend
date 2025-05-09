@@ -1,0 +1,58 @@
+Category,Subcategory,Sub-Subcategory,Value,Color,Description
+Food,Fruits,Apples,1200,#FF5733,Red delicious and other varieties
+Food,Fruits,Oranges,800,#FFA500,Navel and Valencia oranges
+Food,Fruits,Bananas,1500,#FFFF00,Yellow Cavendish bananas
+Food,Vegetables,Carrots,900,#FF8C00,Orange carrots
+Food,Vegetables,Broccoli,700,#008000,Green broccoli florets
+Food,Vegetables,Spinach,600,#228B22,Leafy green vegetable
+Food,Dairy,Milk,2000,#FFFFFF,Whole and skim varieties
+Food,Dairy,Cheese,1800,#FFD700,Cheddar, Swiss, etc.
+Food,Dairy,Yogurt,1200,#F0E68C,Various flavors
+Beverages,Non-Alcoholic,Soda,2500,#C0C0C0,Cola and other carbonated
+Beverages,Non-Alcoholic,Water,3000,#1E90FF,Mineral and spring water
+Beverages,Non-Alcoholic,Juice,1800,#FF6347,Orange, apple, etc.
+Beverages,Alcoholic,Beer,2200,#DAA520,Lager, ale, stout
+Beverages,Alcoholic,Wine,1500,#800000,Red and white varieties
+Beverages,Alcoholic,Spirits,1200,#8B4513,Whiskey, vodka, etc.
+Electronics,Computers,Laptops,3500,#000080,Various brands and models
+Electronics,Computers,Desktops,2800,#4682B4,Workstations and PCs
+Electronics,Phones,Smartphones,4200,#4B0082,iPhone and Android devices
+Electronics,Phones,Tablets,3100,#9370DB,iPad and other tablets
+Electronics,TVs,LED,3800,#000000,4K and 8K models
+Electronics,TVs,OLED,2900,#696969,High-end displays
+Clothing,Men,Shirts,2800,#4169E1,Formal and casual
+Clothing,Men,Pants,2500,#2E8B57,Jeans and dress pants
+Clothing,Men,Shoes,3200,#A0522D,Sneakers and dress shoes
+Clothing,Women,Dresses,3500,#FF69B4,Summer and formal
+Clothing,Women,Blouses,2700,#FF1493,Various styles
+Clothing,Women,Shoes,4000,#FF00FF,Heels and flats
+Transportation,Cars,Sedans,5200,#B22222,Toyota, Honda, etc.
+Transportation,Cars,SUVs,5800,#DC143C,Family vehicles
+Transportation,Motorcycles,Sport,3200,#FF0000,High-performance
+Transportation,Motorcycles,Cruiser,2800,#8B0000,Comfort bikes
+Transportation,Bicycles,Mountain,2100,#2F4F4F,Off-road capable
+Transportation,Bicycles,Road,1900,#708090,Lightweight models
+Home,Furniture,Sofas,3800,#CD853F,Leather and fabric
+Home,Furniture,Beds,4500,#D2691E,Queen and king sizes
+Home,Appliances,Refrigerators,3200,#6495ED,French door models
+Home,Appliances,Washers,2900,#4682B4,Front and top load
+Home,Decor,Lamps,1800,#DAA520,Table and floor
+Home,Decor,Rugs,2100,#BC8F8F,Various sizes
+Entertainment,Music,Instruments,2500,#9932CC,Guitars, pianos, etc.
+Entertainment,Music,Records,1800,#800080,Vinyl collections
+Entertainment,Sports,Equipment,3200,#006400,Gym and outdoor
+Entertainment,Sports,Apparel,2800,#32CD32,Jerseys and shoes
+Entertainment,Games,Video,4000,#000080,Consoles and titles
+Entertainment,Games,Board,1500,#8B4513,Classic and new
+Health,Medicine,Prescription,5200,#FF0000,Various medications
+Health,Medicine,OTC,3800,#FF4500,Pain relievers, etc.
+Health,Fitness,Equipment,2900,#228B22,Weights and machines
+Health,Fitness,Supplements,3200,#2E8B57,Protein and vitamins
+Health,Personal Care,Toiletries,4100,#FFC0CB,Shampoo, soap, etc.
+Health,Personal Care,Cosmetics,3800,#FF69B4,Makeup products
+Education,Books,Textbooks,2800,#8B4513,Academic subjects
+Education,Books,Fiction,3200,#A0522D,Novels and stories
+Education,Supplies,Stationery,1900,#556B2F,Pens and paper
+Education,Supplies,Electronics,2500,#483D8B,Calculators, etc.
+Education,Online,Courses,3500,#4169E1,Various subjects
+Education,Online,Tutorials,2700,#1E90FF,Skill development

@@ -7,14 +7,12 @@ from flask_caching import Cache
 from dotenv import load_dotenv
 import threading
 from data_processor import data_api
-from data_processing.excel_to_csv import convert_api
 from data_visualizations.pie_chart import pie_chart_bp
 from ollama.ollama_insights import insights_api
-from data_processing.csv_insights import csv_insights_api
-from data_processing_flask_api.fix_basics_tab_api import data_cleaning_api
 from s3.upload_profile import upload_profile_bp
 from s3.aws_sync_operations import aws_operations_bp
 from s3.user_sync import user_sync_bp
+from data_tuning.process_data import finetune_api
 
 load_dotenv()
 
@@ -25,14 +23,12 @@ cache_config = {
 
 app = Flask(__name__)
 app.register_blueprint(data_api)
-app.register_blueprint(convert_api)
 app.register_blueprint(insights_api)
-app.register_blueprint(csv_insights_api)
-app.register_blueprint(data_cleaning_api)
 app.register_blueprint(pie_chart_bp)
 app.register_blueprint(upload_profile_bp)
 app.register_blueprint(aws_operations_bp)
 app.register_blueprint(user_sync_bp)
+app.register_blueprint(finetune_api)
 
 
 cache = Cache(app, config=cache_config)
