@@ -8,7 +8,6 @@ insights_api = Blueprint('insights_api', __name__)
 
 OLLAMA_BASE_URL = "http://localhost:11434/api"
 
-
 @insights_api.route('/api/chat/llama', methods=['POST'])
 def chat_with_gemma():
     """

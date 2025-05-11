@@ -12,7 +12,6 @@ from typing import Dict, List, Any, Optional
 # Load environment variables
 load_dotenv()
 
-openai.api_key = os.getenv("OPEN_AI_API_KEY")
 
 csv_insights_api = Blueprint('csv_insights', __name__)
 
@@ -33,15 +32,15 @@ def analyze_csv(df: pd.DataFrame) -> Dict[str, Any]:
         "outliers": {},
         "data_quality": {}  # New section for quality metrics
     }
-    
+
     # Check missing values
     missing_values = df.isnull().sum()
     missing_percentage = (missing_values / total_rows) * 100
-    
+
     # Overall missing values metrics
     insights["data_quality"]["total_missing_cells"] = int(missing_values.sum())
     insights["data_quality"]["total_missing_percentage"] = round((missing_values.sum() / (total_rows * total_columns)) * 100, 2)
-    
+
     if missing_values.sum() > 0:
         for column in df.columns:
             missing_count = missing_values[column]
@@ -50,18 +49,18 @@ def analyze_csv(df: pd.DataFrame) -> Dict[str, Any]:
                     "count": int(missing_count),
                     "percentage": round(missing_percentage[column], 2)
                 }
-    
+
     # Check duplicates
     duplicate_count = df.duplicated().sum()
     insights["duplicates"]["count"] = int(duplicate_count)
     insights["duplicates"]["percentage"] = round((duplicate_count / total_rows) * 100, 2) if total_rows > 0 else 0
-    
+
     # Analyze data types
     type_counts = {"numeric": 0, "categorical": 0, "datetime": 0, "other": 0}
-    
+
     for column in df.columns:
         insights["data_types"][column] = str(df[column].dtype)
-        
+
         # Numeric stats for numeric columns
         if pd.api.types.is_numeric_dtype(df[column]):
             type_counts["numeric"] += 1
@@ -72,7 +71,7 @@ def analyze_csv(df: pd.DataFrame) -> Dict[str, Any]:
                 "median": float(df[column].median()) if not pd.isna(df[column].median()) else None,
                 "std": float(df[column].std()) if not pd.isna(df[column].std()) else None
             }
-            
+
             # Detect outliers using IQR
             Q1 = df[column].quantile(0.25)
             Q3 = df[column].quantile(0.75)
@@ -83,7 +82,7 @@ def analyze_csv(df: pd.DataFrame) -> Dict[str, Any]:
                     "count": int(outlier_count),
                     "percentage": round((outlier_count / total_rows) * 100, 2)
                 }
-        
+
         # Categorical stats
         elif pd.api.types.is_object_dtype(df[column]) or pd.api.types.is_categorical_dtype(df[column]):
             type_counts["categorical"] += 1
@@ -93,56 +92,56 @@ def analyze_csv(df: pd.DataFrame) -> Dict[str, Any]:
                 "unique_values": int(unique_count),
                 "top_5_values": value_counts.head(5).to_dict(),
             }
-        
+
         # Datetime detection
         elif pd.api.types.is_datetime64_any_dtype(df[column]):
             type_counts["datetime"] += 1
         else:
             type_counts["other"] += 1
-    
+
     # Calculate quality scores
     # Data completeness (0-100): 100 means no missing values
     insights["data_quality"]["completeness_score"] = round(100 - insights["data_quality"]["total_missing_percentage"], 2)
-    
+
     # Duplication quality (0-100): 100 means no duplicates
     insights["data_quality"]["duplication_score"] = round(100 - insights["duplicates"]["percentage"], 2)
-    
+
     # Outlier score (0-100): 100 means no outliers
     total_numeric_outliers = sum(outlier["count"] for outlier in insights["outliers"].values()) if insights["outliers"] else 0
     total_numeric_cells = total_rows * type_counts["numeric"] if type_counts["numeric"] > 0 else 1
     outlier_percentage = (total_numeric_outliers / total_numeric_cells) * 100 if total_numeric_cells > 0 else 0
     insights["data_quality"]["outlier_score"] = round(100 - outlier_percentage, 2)
-    
+
     # Overall quality score (average of above metrics)
     insights["data_quality"]["overall_score"] = round(
         (insights["data_quality"]["completeness_score"] + 
          insights["data_quality"]["duplication_score"] + 
          insights["data_quality"]["outlier_score"]) / 3, 2
     )
-    
+
     # Add column-level quality scores
     insights["data_quality"]["column_scores"] = {}
     for column in df.columns:
         # Calculate column quality score based on missing values and outliers
         missing_pct = missing_percentage[column] if column in missing_percentage else 0
         completeness = 100 - missing_pct
-        
+
         outlier_pct = 0
         if pd.api.types.is_numeric_dtype(df[column]) and column in insights["outliers"]:
             outlier_pct = insights["outliers"][column]["percentage"]
-        
+
         outlier_quality = 100 - outlier_pct
         column_score = round((completeness + outlier_quality) / 2, 2)
-        
+
         insights["data_quality"]["column_scores"][column] = {
             "completeness": round(completeness, 2),
             "outlier_quality": round(outlier_quality, 2),
             "overall": column_score
         }
-    
+
     # Add column type distribution
     insights["data_quality"]["column_types"] = type_counts
-    
+
     return insights
 
 def get_ai_insights(df: pd.DataFrame, basic_insights: Dict[str, Any]) -> str:
@@ -161,12 +160,12 @@ def get_ai_insights(df: pd.DataFrame, basic_insights: Dict[str, Any]) -> str:
         else:
             col_type = basic_insights["data_types"][col]
             stats = {}
-        
+
         missing = basic_insights["missing_values"].get(col, {"count": 0, "percentage": 0})
         column_info.append(f"- {col} ({col_type}): {missing['count']} missing values ({missing['percentage']}%)")
-    
+
     data_summary = "\n".join(column_info)
-    
+
     # Create a prompt for the AI
     prompt = f"""
     Analyze this dataset summary and provide actionable insights and recommendations:
@@ -185,7 +184,7 @@ def get_ai_insights(df: pd.DataFrame, basic_insights: Dict[str, Any]) -> str:
     
     Keep your response concise and actionable.
     """
-    
+
     try:
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
@@ -204,30 +203,30 @@ def analyze_csv_file():
     # Check if file is present in the request
     if 'file' not in request.files:
         return jsonify({'error': 'No file part in the request'}), 400
-    
+
     file = request.files['file']
-    
+
     # Check if file is selected
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-    
+
     # Check file extension
     if not file.filename.endswith('.csv'):
         return jsonify({'error': 'Only CSV files are supported'}), 400
-    
+
     # Get the use_ai parameter
     use_ai = request.args.get('use_ai', 'false').lower() == 'true'
-    
+
     try:
         # Read the uploaded CSV file
         content = file.read()
         df = pd.read_csv(io.BytesIO(content))
-        
+
         # Get basic insights
         basic_insights = analyze_csv(df)
-        
+
         response = {"basic_insights": basic_insights}
-        
+
         # Get AI insights if requested
         if use_ai:
             # For large files, we might want to run AI analysis asynchronously
@@ -238,8 +237,8 @@ def analyze_csv_file():
             else:
                 ai_insights = get_ai_insights(df, basic_insights)
                 response["advanced_insights"] = ai_insights
-        
+
         return jsonify(response)
-    
+
     except Exception as e:
         return jsonify({'error': f"Error analyzing CSV: {str(e)}"}), 500

@@ -1,0 +1,77 @@
+Model Name,Variant,Run Command,Notes,Model ID
+gemma3,1b,ollama run gemma3:1b,32K context window,gemma3:1b
+gemma3,4b,ollama run gemma3:4b,128K context window,gemma3:4b
+gemma3,12b,ollama run gemma3:12b,128K context window,gemma3:12b
+gemma3,27b,ollama run gemma3:27b,128K context window,gemma3:27b
+gemma3,1b-it-qat,ollama run gemma3:1b-it-qat,Quantization Aware Training,gemma3:1b-it-qat
+gemma3,4b-it-qat,ollama run gemma3:4b-it-qat,Quantization Aware Training,gemma3:4b-it-qat
+gemma3,12b-it-qat,ollama run gemma3:12b-it-qat,Quantization Aware Training,gemma3:12b-it-qat
+gemma3,27b-it-qat,ollama run gemma3:27b-it-qat,Quantization Aware Training,gemma3:27b-it-qat
+qwen3,0.6b,ollama run qwen3:0.6b,523MB,qwen3:0.6b
+qwen3,1.7b,ollama run qwen3:1.7b,1.4GB,qwen3:1.7b
+qwen3,4b,ollama run qwen3:4b,2.6GB,qwen3:4b
+qwen3,8b,ollama run qwen3:8b,5.2GB,qwen3:8b
+qwen3,14b,ollama run qwen3:14b,9.3GB,qwen3:14b
+qwen3,32b,ollama run qwen3:32b,20GB,qwen3:32b
+qwen3,30b-a3b,ollama run qwen3:30b-a3b,30B MoE, 3B active,qwen3:30b-a3b
+qwen3,235b-a22b,ollama run qwen3:235b-a22b,235B MoE, 22B active, 142GB,qwen3:235b-a22b
+deepseek-r1,671b,ollama run deepseek-r1:671b,Base model,deepseek-r1:671b
+deepseek-r1,1.5b,ollama run deepseek-r1:1.5b,Distilled (Qwen-based),deepseek-r1:1.5b
+deepseek-r1,7b,ollama run deepseek-r1:7b,Distilled (Qwen-based),deepseek-r1:7b
+deepseek-r1,8b,ollama run deepseek-r1:8b,Distilled (LLaMA-based),deepseek-r1:8b
+deepseek-r1,14b,ollama run deepseek-r1:14b,Distilled (Qwen-based),deepseek-r1:14b
+deepseek-r1,32b,ollama run deepseek-r1:32b,Distilled (Qwen-based),deepseek-r1:32b
+deepseek-r1,70b,ollama run deepseek-r1:70b,Distilled (LLaMA-based),deepseek-r1:70b
+llama4,scout,ollama run llama4:scout,109B parameters, 17B active,llama4:scout
+llama4,maverick,ollama run llama4:maverick,400B parameters, 17B active,llama4:maverick
+llama3.3,70b,ollama run llama3.3:70b,70.6B parameters, 43GB, Q4_K_M quantization,llama3.3:70b
+phi4,14b,ollama run phi4:14b,14B parameters, 9.1GB, Q4_K_M quantization,phi4:14b
+llama3.2,(default),ollama run llama3.2,3B parameters,llama3.2
+llama3.2,1b,ollama run llama3.2:1b,1B parameters,llama3.2:1b
+llama3.1,8b,ollama run llama3.1:8b,8B parameters, 4.9GB,llama3.1:8b
+llama3.1,70b,ollama run llama3.1:70b,70B parameters, 43GB,llama3.1:70b
+llama3.2,405b,ollama run llama3.2:405b,405B parameters, 243GB,llama3.2:405b
+mistral,(default),ollama run mistral,7B parameters,mistral
+llama3,(default),ollama run llama3,8B parameters, Instruct variant,llama3
+llama3,70b,ollama run llama3:70b,70B parameters, Instruct variant,llama3:70b
+llama3,text,ollama run llama3:text,8B parameters, Pretrained variant,llama3:text
+llama3,70b-text,ollama run llama3:70b-text,70B parameters, Pretrained variant,llama3:70b-text
+qwen2.5,0.5b,ollama run qwen2.5:0.5b,0.5B parameters,qwen2.5:0.5b
+qwen2.5,1.5b,ollama run qwen2.5:1.5b,1.5B parameters,qwen2.5:1.5b
+qwen2.5,3b,ollama run qwen2.5:3b,3B parameters,qwen2.5:3b
+qwen2.5,7b,ollama run qwen2.5:7b,7B parameters,qwen2.5:7b
+qwen2.5,14b,ollama run qwen2.5:14b,14B parameters,qwen2.5:14b
+qwen2.5,32b,ollama run qwen2.5:32b,32B parameters,qwen2.5:32b
+qwen2.5,72b,ollama run qwen2.5:72b,72B parameters,qwen2.5:72b
+llava,(default),ollama run llava,,llava
+qwen2.5-coder,0.5b,ollama run qwen2.5-coder:0.5b,531MB,qwen2.5-coder:0.5b
+qwen2.5-coder,1.5b,ollama run qwen2.5-coder:1.5b,986MB,qwen2.5-coder:1.5b
+qwen2.5-coder,3b,ollama run qwen2.5-coder:3b,1.9GB,qwen2.5-coder:3b
+qwen2.5-coder,7b,ollama run qwen2.5-coder:7b,4.7GB,qwen2.5-coder:7b
+qwen2.5-coder,14b,ollama run qwen2.5-coder:14b,9.0GB,qwen2.5-coder:14b
+qwen2.5-coder,32b,ollama run qwen2.5-coder:32b,20GB,qwen2.5-coder:32b
+qwen,0.5b,ollama run qwen:0.5b,,qwen:0.5b
+qwen,1.8b,ollama run qwen:1.8b,,qwen:1.8b
+qwen,4b,ollama run qwen:4b,,qwen:4b
+qwen,7b,ollama run qwen:7b,,qwen:7b
+qwen,14b,ollama run qwen:14b,,qwen:14b
+qwen,32b,ollama run qwen:32b,,qwen:32b
+qwen,72b,ollama run qwen:72b,,qwen:72b
+qwen,110b,ollama run qwen:110b,,qwen:110b
+gemma2,(default),ollama run gemma2,9B parameters, 5.4GB,gemma2
+gemma2,2b,ollama run gemma2:2b,2B parameters, 1.6GB,gemma2:2b
+gemma2,27b,ollama run gemma2:27b,27B parameters, 16GB,gemma2:27b
+gemma,7b,ollama run gemma:7b,7B parameters,gemma:7b
+gemma,2b,ollama run gemma:2b,2B parameters,gemma:2b
+qwen2,0.5b,ollama run qwen2:0.5b,0.5B parameters, 352MB,qwen2:0.5b
+qwen2,1.5b,ollama run qwen2:1.5b,1.5B parameters, 935MB,qwen2:1.5b
+qwen2,7b,ollama run qwen2:7b,7B parameters, 4.4GB,qwen2:7b
+qwen2,72b,ollama run qwen2:72b,72B parameters, 41GB,qwen2:72b
+llama2,(default),ollama run llama2,Chat variant,llama2
+llama2,text,ollama run llama2:text,Pretrained variant,llama2:text
+phi3,mini,ollama run phi3:mini,,phi3:mini
+phi3,medium,ollama run phi3:medium,,phi3:medium
+phi3,medium-128k,ollama run phi3:medium-128k,Requires Ollama 0.1.39+,phi3:medium-128k
+mxbai-embed-large,(N/A),API/Library Access,334M parameters, F16 quantization, 670MB,
+llama3.2-vision,11b,ollama pull llama3.2-vision:11b,11B parameters, 7.9GB,llama3.2-vision:11b
+llama3.2-vision,90b,ollama pull llama3.2-vision:90b,90B parameters, 55GB,llama3.2-vision:90b

@@ -8,11 +8,13 @@ from dotenv import load_dotenv
 import threading
 from data_processor import data_api
 from data_visualizations.pie_chart import pie_chart_bp
-from ollama.ollama_insights import insights_api
 from s3.upload_profile import upload_profile_bp
 from s3.aws_sync_operations import aws_operations_bp
 from s3.user_sync import user_sync_bp
 from data_tuning.process_data import finetune_api
+from ollama_services.ollama_insights import insights_api
+from ollama_services.ollama_model_service import ollama_model_bp
+from ollama_services.ollama_chat_service import ollama_chat_service_bp
 
 load_dotenv()
 
@@ -29,7 +31,8 @@ app.register_blueprint(upload_profile_bp)
 app.register_blueprint(aws_operations_bp)
 app.register_blueprint(user_sync_bp)
 app.register_blueprint(finetune_api)
-
+app.register_blueprint(ollama_model_bp)
+app.register_blueprint(ollama_chat_service_bp)
 
 cache = Cache(app, config=cache_config)
 

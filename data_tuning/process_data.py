@@ -2,12 +2,15 @@ import os
 import uuid
 import csv
 import json
+import re
+from json import JSONDecodeError
 from typing import Dict, List, Tuple, Any
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from werkzeug.utils import secure_filename
-import openai
+from openai import OpenAI
 
-openai.api_key = os.getenv("OPEN_AI_API_KEY")
+client = OpenAI(api_key=os.getenv("OPEN_AI_API_KEY"))
+
 
 finetune_api = Blueprint('finetune_api', __name__)
 
@@ -200,16 +203,17 @@ def suggest_templates():
     sample = rows[:sample_size]
 
     user_prompt = (
-        "Given these sample data rows (as JSON array):\n"
+        "You are a helpful assistant that generates TEMPLATE STRINGS for prompts and responses using "
+        "curly-brace placeholders for column names. Do NOT fill in actual values—leave placeholders intact.\n\n"
+        "Sample data rows (JSON array):\n"
         f"{json.dumps(sample, indent=2)}\n\n"
-        "Please suggest 3 prompt templates and 3 response templates "
-        "for use in OpenAI chat-style fine-tuning. It should also be friendly for tuning other models as well"
-        "Return ONLY a JSON array of objects with keys "
-        "'prompt_template' and 'response_template'."
+        "Provide 3 distinct prompt templates and 3 corresponding response templates. "
+        "Use placeholders in the form {ColumnName}, matching the CSV headers exactly. "
+        "Return only a JSON array of objects with keys 'prompt_template' and 'response_template'."
     )
 
     try:
-        resp = openai.ChatCompletion.create(
+        resp = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that suggests prompt/response templates."},
@@ -218,11 +222,22 @@ def suggest_templates():
             temperature=0.7,
             max_tokens=400
         )
-        content = resp.choices[0].message.content.strip()
-        templates = json.loads(content)
-    except Exception as e:
-        current_app.logger.error(f"Template suggestion failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        raw = resp.choices[0].message.content.strip()
+
+        cleaned = re.sub(r"```(?:json)?\n?|```", "", raw).strip()
+
+        m = re.search(r"\[.*\]", cleaned, flags=re.DOTALL)
+        json_text = m.group(0) if m else cleaned
+
+        templates = json.loads(json_text)
+
+    except (JSONDecodeError, Exception) as e:
+        current_app.logger.error(f"Template suggestion failed: {e}\nRaw response:\n{raw}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to parse model response as JSON",
+            "detail": str(e)
+        }), 500
 
     return jsonify({
         "status": "success",
